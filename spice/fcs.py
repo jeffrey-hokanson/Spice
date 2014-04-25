@@ -6,17 +6,20 @@ import re
 import numpy as np
 
 debug = False
-debug = True
+#debug = True
 
 if debug:
     import pprint
 
 # TODO: remove error text message and replace with raising exceptions
 
-def read(filename):
+def read(filename, convert_metadata = True):
     """
         Reads in an FCS file, given by filename and returns a tuple containing
         a numpy array and a dictionary of data.
+
+        convert_metadata - convert the metadata into python appropreate types
+            i.e., the string '15' becomes the integer 15
 
         Based on Laszlo Balkay's fca_readfcs.m from 3 Dec 2013.
     """
@@ -136,12 +139,33 @@ def read(filename):
         data = []
         for j in range(0,n_parameters):
             data.append(np.fromfile(f,dtype=data_type[j], count=n_events))
-    
-    #if debug:   
-        #print header   
- 
-    return (data, metadata)
+   
+    # TODO: Read analysis section of file
 
+    analysis = None
+    meta_analysis = None
+
+
+
+    if convert_metadata:
+        metadata['$TOT'] = int(metadata['$TOT'])
+        metadata['$PAR'] = int(metadata['$PAR'])
+
+
+
+
+
+    return (data, metadata, analysis, meta_analysis)
+
+
+
+def save(filename, data, metadata, analysis = None, meta_analysis = None):
+
+    raise NotImplementedError
+
+
+
+# TODO: Remove this primative testing code in favor of a more professional version
 if __name__ == '__main__':
     (data, metadata) = read('test.fcs')
     import pprint

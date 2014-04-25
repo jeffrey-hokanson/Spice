@@ -2,7 +2,6 @@
 #include "math.h"
 #include <stdlib.h>
 
-
 /* NB: The current implementation is O(# of data points) because we determine the window of which points are actually
  * affected by the sparse kernel.  
  *
