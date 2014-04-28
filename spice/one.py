@@ -4,12 +4,13 @@
 """ A one dimensional viewer 
 """
 
-import wx
-import wx.gizmos as gizmos
 import os
 import sys
 
+import wx
+import wx.gizmos as gizmos
 from wx.lib.pubsub import pub
+
 
 import numpy as np
 import matplotlib
@@ -18,7 +19,6 @@ matplotlib.use('WXAgg')
 from matplotlib.backends.backend_wxagg import FigureCanvasWxAgg as FigureCanvas
 from matplotlib.backends.backend_wxagg import NavigationToolbar2Wx
 from matplotlib.figure import Figure
-import wx.lib.agw.foldpanelbar as fpb
 
 from flowdata import FlowData as FlowData
 from flowdata import FlowAnalysis as FlowAnalysis
