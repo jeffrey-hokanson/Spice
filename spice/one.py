@@ -5,6 +5,7 @@
 """
 
 import wx
+import wx.gizmos as gizmos
 import os
 import sys
 
@@ -19,6 +20,8 @@ from matplotlib.backends.backend_wxagg import NavigationToolbar2Wx
 from matplotlib.figure import Figure
 import wx.lib.agw.foldpanelbar as fpb
 
+from flowdata import FlowData as FlowData
+from flowdata import FlowAnalysis as FlowAnalysis
 
 class OneFrame(wx.Frame):
 
@@ -26,15 +29,12 @@ class OneFrame(wx.Frame):
         wx.Frame.__init__(self, *args, **kwargs)
         
         # Storage of data
-        self._flowdata = []
+        self.fa = FlowAnalysis()
         
-        # Default Variables
+        # Default Variables: these are not to be written to,
+        # as the memory is shared throughout the program
         self._channel = 0
-        self._index = 0
-
-
-        
-
+        self._sample = [0]
 
         ######################################################################## 
         # Create the toolbar on the main window
@@ -93,14 +93,86 @@ class OneFrame(wx.Frame):
 
         sizer.Add(self.cp, 0, wx.EXPAND)
 
+        self.cp2 = cp2 = wx.CollapsiblePane(self, label="Gating Tree", style=wx.CP_DEFAULT_STYLE)
+        
+        self.tree = TreeData(cp2.GetPane(), self)
+
+        sizer.Add(self.cp2, 0, wx.EXPAND)
+        ######################################################################## 
+        # Bind Events
+        ######################################################################## 
+
+        self.Bind(wx.EVT_TOOL, self.load_dialog, id = tb_load_ID) 
+        self.Bind(wx.EVT_TOOL, self.plus_channel, id = tb_forward_ID)
+        self.Bind(wx.EVT_TOOL, self.minus_channel, id = tb_back_ID)
+        self.Bind(wx.EVT_COMBOBOX, self.on_tag_list, id = tb_tag_list_ID)
+        self.Bind(wx.EVT_CHAR_HOOK, self.on_key)
         ######################################################################## 
         # Finalize setup
         ######################################################################## 
         
         self.SetSizer(sizer)
 
+    def load(self, filename):
+        self.fa.load(filename)
+        self.tree.update()
+        self.index = len(self.fa)-1
+        self.update_tag_list()
 
-class OneControl():
+    def load_dialog(self, event):
+        dlg = wx.FileDialog(self, "Choose an FCS file", os.getcwd(), "", "*.fcs", wx.OPEN)
+        if dlg.ShowModal() == wx.ID_OK:
+            path = dlg.GetPath()
+            self.load(path) 
+        dlg.Destroy()
+        
+    @property
+    def channel(self):
+        return self._channel
+    @property
+    def sample(self):
+        return self._sample
+
+
+    def plus_channel(self, event = None):
+        self._channel = (self._channel + 1) % self.fa[self.sample[0]].nparameters
+        self.set_channel()
+    
+    def minus_channel(self, event = None):
+        self._channel = (self._channel - 1) % self.fa[self.sample[0]].nparameters
+        self.set_channel()
+
+    def set_channel(self, channel = None):
+        if channel is None:
+            channel = self._channel
+        self._channel = channel
+        
+        self.tag_list.SetSelection(self.channel)
+        self.figure.plot()
+
+    def update_tag_list(self):
+        self.tag_list.Clear()
+        fd = self.fa[self.sample[0]]
+        tags = fd.tags
+        markers = fd.markers
+
+        labels = []
+        for j in range(fd.nparameters):
+            labels.append(tags[j] + ' :: ' + markers[j])
+
+        self.tag_list.AppendItems(labels)
+        self.tag_list.SetSelection(0)
+
+    def on_tag_list(self, event):
+        self.set_channel(self.tag_list.GetSelection())
+
+    def on_key(self, event):
+        if event.GetKeyCode() == wx.WXK_LEFT:
+            self.minus_channel()
+        if event.GetKeyCode() == wx.WXK_RIGHT:
+            self.plus_channel()
+
+class OneControl:
     """ A panel containing widgets for controlling the appearance of OnePlot
     """
     def __init__(self, pane, figure):
@@ -116,19 +188,55 @@ class OneControl():
 
         combo_xtransform = wx.ComboBox(pane, combo_xtransform_ID, style = wx.CB_DROPDOWN | wx.CB_READONLY)
         combo_xtransform.AppendItems(['Linear', 'Log', 'Biexponential', 'Arcsinh'])
-        print combo_xtransform.GetBestSize()
         combo_xtransform.SetSize(combo_xtransform.GetBestSize())
         sizer_xtransform.Add(combo_xtransform, 0, wx.ALL|wx.ALIGN_CENTER)
 
         pane.SetSizer(sizer_xtransform)
+       
+
+class TreeData():
+    """ A tree for showing gates/masks and multiple file sets
+    """
+    def __init__(self, pane, parent):
+        self.pane = pane
+        self.parent = parent
+        self.fa = parent.fa
+        pane.SetDoubleBuffered(True)
+        sizer = wx.BoxSizer(wx.VERTICAL)
+
+        self.tree = gizmos.TreeListCtrl(pane, -1, style = wx.TR_DEFAULT_STYLE|wx.TR_FULL_ROW_HIGHLIGHT|
+                        wx.TR_HIDE_ROOT)
         
+        self.tree.AddColumn("File name")
+        self.tree.AddColumn("Site")
+        self.tree.AddColumn("Time")
+        
+        self.root = self.tree.AddRoot("The Root Item")
+        sizer.Add(self.tree, 1, wx.EXPAND)
+
+        pane.SetSizer(sizer)
+
+
+    def update(self):
+        """ Update the list of loaded files"""
+        self.tree.DeleteAllItems()
+        self.root = self.tree.AddRoot("Invisible Root")
+        self.children = []
+        for fd in self.fa:
+            child = self.tree.AppendItem(self.root, fd.filename)
+            self.children.append(child)
+
 
 class OnePlot(wx.Panel):
-    """ A panel for one dimensional plotting
+    """ A pane for one dimensional plotting.
+        This class initilizes a set of controls that appear inside OneFrame
+        and then 
     """
-    def __init__(self, *args, **kwargs):
-        wx.Panel.__init__(self, *args, **kwargs)
+    def __init__(self, parent, *args, **kwargs):
+        wx.Panel.__init__(self, parent, *args, **kwargs)
 
+        # Setup default parameters
+        self.parent = parent
 
         # Get the background colour
         bg_color = self.GetBackgroundColour()
@@ -137,17 +245,27 @@ class OnePlot(wx.Panel):
         self.figure = Figure(facecolor = bg_color)
 
         self.ax = self.figure.add_subplot(111)
-        self.canvas = FigureCanvas(self, -1, self.figure)
-        
-        self.sizer = wx.BoxSizer(wx.VERTICAL)
-        self.sizer.Add(self.canvas, 1, wx.LEFT | wx.TOP | wx.GROW)
-        self.SetSizer(self.sizer)
-        self.Fit()
+        self.canvas = FigureCanvas(self, -1, self.figure)    
+        self.Bind(wx.EVT_SIZE, self._size)
 
-        # TODO: Temp. testing code
-        t = np.linspace(0, 1, 100)
-        x = np.sin(10*t)
-        self.ax.plot(t, x)
+
+    def _size(self, event):
+        self.canvas.SetSize(self.GetSize())
+        self.figure.tight_layout(pad=2)
+    
+    def plot(self):
+        sample = self.parent.sample
+        channel = self.parent.channel
+        fa = self.parent.fa
+        self.ax.cla()
+        # TODO: import more control properties here
+        for j in sample:
+            (xgrid, den) = fa[j].histogram(channel)
+            self.ax.plot(xgrid,den)
+        
+        self.figure.tight_layout(pad=2)
+        self.canvas.draw()
+
 
 class App(wx.App):
     """ Stand alone version of the one dimensional view
@@ -158,12 +276,12 @@ class App(wx.App):
         # Read in files from command line
         if len(sys.argv) != 1:
             for arg in sys.argv[1:]:
-                print arg
                 filename = os.path.join(os.getcwd(),arg)
                 if os.path.isfile(filename):
-                    self.frame.load_file(filename)
+                    self.frame.load(filename)
 
 
+        self.frame.SetDoubleBuffered(True)
         self.frame.Show()
         return True
 

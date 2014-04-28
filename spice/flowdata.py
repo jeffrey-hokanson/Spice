@@ -1,10 +1,10 @@
-#!/usr/bin/env python
+#i!/usr/bin/env python
 # vim: tabstop=8 expandtab shiftwidth=4 softtabstop=4
 #
 # A package containing a data structure for a single flow cytometry experiment
 
+import os
 import numpy as np
-
 import fcs
 
 from kde import kde
@@ -19,6 +19,8 @@ class FlowData:
     def __init__(self, path = None):
         (self._data, self._metadata, self._analysis, self._meta_analysis) = \
             fcs.read(path, True)
+        self._path = path
+        self._filename = os.path.basename(path)
 
     # Raw accessors for critical
     @property
@@ -36,6 +38,12 @@ class FlowData:
     @property
     def meta_analysis(self):
         return self._meta_analysis
+    @property
+    def path(self):
+        return self._path
+    @property
+    def filename(self):
+        return self._filename
 
     # Virtual accessors for properties stored in the metadata
     # We do this rather than copy values out into temporary variables
@@ -83,7 +91,7 @@ class FlowData:
         """ Generate histogram
         """
         npoints = 10001
-        
+
         data = self.data[channel]
         xmin = np.min(data)
         xmax = np.max(data)
@@ -91,3 +99,46 @@ class FlowData:
         den = kde.hat_linear(data, bandwidth, xmin, xmax, npoints)
         xgrid = np.linspace(xmin, xmax, npoints)
         return (xgrid, den)
+
+
+
+
+class FlowAnalysis:
+    """ A container class for multiple datasets.
+        This largely emulates a list, but we are leaving the option open
+        for later complexity
+    """
+    def __init__(self):
+        self._fd = []   # Container for flow data
+
+    def load(self, filename):
+        """Load an fcs file into the analysis set. """
+        self._fd.append(FlowData(filename))
+
+    def list_files(self):
+        lf = []
+        for fd in self._fd:
+            lf.append(fd.filename)
+        return lf
+
+    def __len__(self):
+        return len(self._fd)
+
+    def __getitem__(self, key):
+        # TODO: Should we allow access by other than index?
+        if key < 0 or key >= self.__len__():
+            raise IndexError
+
+        return self._fd[key]
+
+    def __setitem__(self, key, value):
+        raise NotImplementedError
+
+    def __delitem__(self, key):
+        raise NotImplementedError
+
+    def __iter__(self):
+        return self._fd.__iter__()
+
+
+
