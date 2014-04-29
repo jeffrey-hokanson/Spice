@@ -16,9 +16,11 @@ import numpy as np
 import matplotlib
 matplotlib.interactive(True)
 matplotlib.use('WXAgg')
+import matplotlib.scale
 from matplotlib.backends.backend_wxagg import FigureCanvasWxAgg as FigureCanvas
 from matplotlib.backends.backend_wxagg import NavigationToolbar2Wx
 from matplotlib.figure import Figure
+
 
 from flowdata import FlowData as FlowData
 from flowdata import FlowAnalysis as FlowAnalysis
@@ -148,6 +150,8 @@ class OneFrame(wx.Frame):
         self._channel = channel
         
         self.tag_list.SetSelection(self.channel)
+        # TODO: This will need to call the saved variables
+        # and update with current values
         self.figure.plot()
 
     def update_tag_list(self):
@@ -178,21 +182,133 @@ class OneControl:
     def __init__(self, pane, figure):
         self.pane = pane
         self.figure = figure
-        sizer_xtransform = wx.BoxSizer(wx.HORIZONTAL)
         
-        text_xtransform = wx.StaticText(pane, -1, "X Transform")
-        text_xtransform.SetSize(text_xtransform.GetBestSize())
-        sizer_xtransform.Add(text_xtransform, 0, wx.ALL|wx.ALIGN_CENTER)
-
-        combo_xtransform_ID = wx.NewId()
-
-        combo_xtransform = wx.ComboBox(pane, combo_xtransform_ID, style = wx.CB_DROPDOWN | wx.CB_READONLY)
-        combo_xtransform.AppendItems(['Linear', 'Log', 'Biexponential', 'Arcsinh'])
-        combo_xtransform.SetSize(combo_xtransform.GetBestSize())
-        sizer_xtransform.Add(combo_xtransform, 0, wx.ALL|wx.ALIGN_CENTER)
-
-        pane.SetSizer(sizer_xtransform)
+        gbs = wx.GridBagSizer(5, 3)
+        
+        # Poll avalible scales from matplotlib
+        self.scales = scales = matplotlib.scale.get_scale_names()
        
+        ########################################################################
+        # X/Y Control Title Column
+        ########################################################################
+        text_scale = wx.StaticText(pane, -1, "Scale")
+        text_scale_param = wx.StaticText(pane, -1, "Cofactor")
+        text_min = wx.StaticText(pane, -1, "Min")
+        text_max = wx.StaticText(pane, -1, "Max")
+
+        flag = wx.ALIGN_RIGHT | wx.ALIGN_CENTER_VERTICAL
+        gbs.Add(text_scale, (1,0), flag = flag)
+        gbs.Add(text_scale_param, (2,0), flag = flag)
+        gbs.Add(text_min, (3,0), flag = flag)
+        gbs.Add(text_max, (4,0), flag = flag)
+
+        ########################################################################
+        # X Control Column
+        ########################################################################
+        text_x = wx.StaticText(pane, -1, "X Configuration")
+        
+        combo_xscale_ID = wx.NewId()
+        combo_xscale = wx.ComboBox(pane, combo_xscale_ID, style = wx.CB_DROPDOWN | wx.CB_READONLY)
+        combo_xscale.AppendItems(scales)
+        combo_xscale.SetSize(combo_xscale.GetBestSize())
+        self.combo_xscale = combo_xscale
+
+        spin_xcofactor_ID = wx.NewId()
+        spin_xcofactor = wx.SpinCtrl(pane, spin_xcofactor_ID, "5")
+        spin_xmin_ID = wx.NewId()
+        spin_xmin = wx.SpinCtrl(pane, spin_xmin_ID, "0")
+        spin_xmax_ID = wx.NewId()
+        spin_xmax = wx.SpinCtrl(pane, spin_xmax_ID, "100")
+
+        flag = wx.ALIGN_LEFT | wx.ALIGN_CENTER_VERTICAL
+        gbs.Add(text_x, (0,1))
+        gbs.Add(combo_xscale, (1,1), flag = flag)
+        gbs.Add(spin_xcofactor, (2,1), flag = flag)
+        gbs.Add(spin_xmin, (3,1), flag = flag)
+        gbs.Add(spin_xmax, (4,1), flag = flag)
+
+        ########################################################################
+        # Y Control Column
+        ########################################################################
+        text_y = wx.StaticText(pane, -1, "Y Configuration")
+        
+        combo_yscale_ID = wx.NewId()
+        combo_yscale = wx.ComboBox(pane, combo_yscale_ID, style = wx.CB_DROPDOWN | wx.CB_READONLY)
+        combo_yscale.AppendItems(scales)
+        combo_yscale.SetSize(combo_xscale.GetBestSize())
+        self.combo_yscale = combo_yscale
+
+        spin_ycofactor_ID = wx.NewId()
+        spin_ycofactor = wx.SpinCtrl(pane, spin_ycofactor_ID, "5")
+        
+        spin_ymin_ID = wx.NewId()
+        spin_ymin = wx.SpinCtrl(pane, spin_ymin_ID, "0")
+
+        spin_ymax_ID = wx.NewId()
+        spin_ymax = wx.SpinCtrl(pane, spin_ymax_ID, "100")
+
+        flag = wx.ALIGN_LEFT | wx.ALIGN_CENTER_VERTICAL
+        gbs.Add(text_y, (0,2))
+        gbs.Add(combo_yscale, (1,2), flag = flag)
+        gbs.Add(spin_ycofactor, (2,2), flag = flag)
+        gbs.Add(spin_ymin, (3,2), flag = flag)
+        gbs.Add(spin_ymax, (4,2), flag = flag)
+
+        pane.SetSizer(gbs)
+
+
+        ########################################################################
+        # Bind Events
+        ########################################################################
+        pane.Bind(wx.EVT_COMBOBOX, self.on_xscale, id = combo_xscale_ID)
+        pane.Bind(wx.EVT_COMBOBOX, self.on_yscale, id = combo_yscale_ID)
+
+        # Intialize
+        self.get_current()
+
+    def save(self):
+        raise NotImplementedError
+    
+    def load(self):
+        raise NotImplementedError
+    
+    def get_current(self):
+        xscale = self.figure.ax.get_xscale()
+        
+
+    def on_xscale(self, event = None, xscale = None):
+        if not event is None:
+            number = self.combo_xscale.GetSelection()
+            xscale = self.scales[number]
+        elif not xscale is None:
+            xscale = xscale
+        else:
+            raise ValueError("Must supply either an event or an xscale")
+
+        try:
+            self.figure.ax.set_xscale(xscale)
+        except:
+            raise NotImplementedError("Scaling {} not implemented".format(xscale))
+        
+        self.figure.draw()
+    
+    def on_yscale(self, event = None, yscale = None):
+        if not event is None:
+            number = self.combo_yscale.GetSelection()
+            yscale = self.scales[number]
+        elif not xscale is None:
+            yscale = yscale
+        else:
+            raise ValueError("Must supply either an event or an xscale")
+
+        try:
+            self.figure.ax.set_yscale(yscale)
+        except:
+            raise NotImplementedError("Scaling {} not implemented".format(yscale))
+        
+        self.figure.draw()
+
+
 
 class TreeData():
     """ A tree for showing gates/masks and multiple file sets
@@ -266,6 +382,8 @@ class OnePlot(wx.Panel):
         self.figure.tight_layout(pad=2)
         self.canvas.draw()
 
+    def draw(self):
+        self.canvas.draw()
 
 class App(wx.App):
     """ Stand alone version of the one dimensional view
