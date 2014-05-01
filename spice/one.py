@@ -10,6 +10,7 @@ import sys
 import wx
 import wx.gizmos as gizmos
 from wx.lib.pubsub import pub
+from wx.lib.agw.floatspin import FloatSpin as FloatSpin
 
 
 import numpy as np
@@ -108,7 +109,7 @@ class OneFrame(wx.Frame):
         self.Bind(wx.EVT_TOOL, self.plus_channel, id = tb_forward_ID)
         self.Bind(wx.EVT_TOOL, self.minus_channel, id = tb_back_ID)
         self.Bind(wx.EVT_COMBOBOX, self.on_tag_list, id = tb_tag_list_ID)
-        self.Bind(wx.EVT_CHAR_HOOK, self.on_key)
+        #self.Bind(wx.EVT_CHAR_HOOK, self.on_key)
         ######################################################################## 
         # Finalize setup
         ######################################################################## 
@@ -152,7 +153,9 @@ class OneFrame(wx.Frame):
         self.tag_list.SetSelection(self.channel)
         # TODO: This will need to call the saved variables
         # and update with current values
+
         self.figure.plot()
+        self.control.channel = channel
 
     def update_tag_list(self):
         self.tag_list.Clear()
@@ -173,21 +176,28 @@ class OneFrame(wx.Frame):
     def on_key(self, event):
         if event.GetKeyCode() == wx.WXK_LEFT:
             self.minus_channel()
-        if event.GetKeyCode() == wx.WXK_RIGHT:
+        elif event.GetKeyCode() == wx.WXK_RIGHT:
             self.plus_channel()
 
-class OneControl:
+        else:
+            event.Skip()
+
+
+# NB: We inherit from object so that getters/setters will work properly
+class OneControl(object):
     """ A panel containing widgets for controlling the appearance of OnePlot
     """
     def __init__(self, pane, figure):
         self.pane = pane
         self.figure = figure
-        
-        gbs = wx.GridBagSizer(5, 3)
+        self._channel = 0
+
+        gbs = wx.GridBagSizer(5, 5)
         
         # Poll avalible scales from matplotlib
         self.scales = scales = matplotlib.scale.get_scale_names()
-       
+        self.kernels = kernels = FlowData().kernel_1D_list
+        print kernels
         ########################################################################
         # X/Y Control Title Column
         ########################################################################
@@ -211,14 +221,16 @@ class OneControl:
         combo_xscale = wx.ComboBox(pane, combo_xscale_ID, style = wx.CB_DROPDOWN | wx.CB_READONLY)
         combo_xscale.AppendItems(scales)
         combo_xscale.SetSize(combo_xscale.GetBestSize())
-        self.combo_xscale = combo_xscale
 
         spin_xcofactor_ID = wx.NewId()
-        spin_xcofactor = wx.SpinCtrl(pane, spin_xcofactor_ID, "5")
+        spin_xcofactor = FloatSpin(pane,spin_xcofactor_ID, value = 5, min_val = None, max_val = None) 
+        spin_xcofactor.SetFormat("%g")
         spin_xmin_ID = wx.NewId()
-        spin_xmin = wx.SpinCtrl(pane, spin_xmin_ID, "0")
+        spin_xmin = FloatSpin(pane,spin_xmin_ID, value = -1, min_val = None, max_val = None) 
+        spin_xmin.SetFormat("%g")
         spin_xmax_ID = wx.NewId()
-        spin_xmax = wx.SpinCtrl(pane, spin_xmax_ID, "100")
+        spin_xmax = FloatSpin(pane,spin_xmax_ID, value = 100, min_val = None, max_val = None) 
+        spin_xmax.SetFormat("%g")
 
         flag = wx.ALIGN_LEFT | wx.ALIGN_CENTER_VERTICAL
         gbs.Add(text_x, (0,1))
@@ -227,6 +239,10 @@ class OneControl:
         gbs.Add(spin_xmin, (3,1), flag = flag)
         gbs.Add(spin_xmax, (4,1), flag = flag)
 
+        self.combo_xscale = combo_xscale
+        self.spin_xcofactor = spin_xcofactor
+        self.spin_xmin = spin_xmin
+        self.spin_xmax = spin_xmax
         ########################################################################
         # Y Control Column
         ########################################################################
@@ -235,17 +251,20 @@ class OneControl:
         combo_yscale_ID = wx.NewId()
         combo_yscale = wx.ComboBox(pane, combo_yscale_ID, style = wx.CB_DROPDOWN | wx.CB_READONLY)
         combo_yscale.AppendItems(scales)
-        combo_yscale.SetSize(combo_xscale.GetBestSize())
+        combo_yscale.SetSize(combo_yscale.GetBestSize())
         self.combo_yscale = combo_yscale
 
         spin_ycofactor_ID = wx.NewId()
-        spin_ycofactor = wx.SpinCtrl(pane, spin_ycofactor_ID, "5")
+        spin_ycofactor = FloatSpin(pane,spin_ycofactor_ID, value = 5, min_val = None, max_val = None) 
+        spin_ycofactor.SetFormat("%g")
         
         spin_ymin_ID = wx.NewId()
-        spin_ymin = wx.SpinCtrl(pane, spin_ymin_ID, "0")
+        spin_ymin = FloatSpin(pane,spin_ymin_ID, value = -1, min_val = None, max_val = None) 
+        spin_ymin.SetFormat("%g")
 
         spin_ymax_ID = wx.NewId()
-        spin_ymax = wx.SpinCtrl(pane, spin_ymax_ID, "100")
+        spin_ymax = FloatSpin(pane,spin_ymax_ID, value = 100, min_val = None, max_val = None) 
+        spin_ymax.SetFormat("%g")
 
         flag = wx.ALIGN_LEFT | wx.ALIGN_CENTER_VERTICAL
         gbs.Add(text_y, (0,2))
@@ -253,18 +272,165 @@ class OneControl:
         gbs.Add(spin_ycofactor, (2,2), flag = flag)
         gbs.Add(spin_ymin, (3,2), flag = flag)
         gbs.Add(spin_ymax, (4,2), flag = flag)
+        
+        self.combo_yscale = combo_yscale
+        self.spin_ycofactor = spin_ycofactor
+        self.spin_ymin = spin_ymin
+        self.spin_ymax = spin_ymax
+        ########################################################################
+        # Titles for Histogram/KDE Control
+        ########################################################################
+        text_kernel = wx.StaticText(pane, -1, "Kernel")
+        text_width_mode = wx.StaticText(pane, -1, "Method")
+        text_width = wx.StaticText(pane, -1, "Bandwidth")
+        text_kde = wx.StaticText(pane, -1, "Kernel Configuration")
 
-        pane.SetSizer(gbs)
+        gbs.Add(text_kde, (0,3), (1,2), flag = wx.ALIGN_CENTER)
+        flag = wx.ALIGN_RIGHT | wx.ALIGN_CENTER_VERTICAL
+        gbs.Add(text_kernel, (1,3), flag = flag)
+        gbs.Add(text_width_mode, (2,3), flag = flag)
+        gbs.Add(text_width, (3,3), flag = flag)
 
+        ########################################################################
+        # Histogram/KDE Control
+        ########################################################################
+        combo_kernel_ID = wx.NewId()
+        combo_kernel = wx.ComboBox(pane, combo_kernel_ID, style = wx.CB_DROPDOWN | wx.CB_READONLY)
+        combo_kernel.AppendItems(kernels)
+        combo_kernel.SetSize(combo_kernel.GetBestSize())
+
+        combo_width_ID = wx.NewId()
+        combo_width = wx.ComboBox(pane, combo_width_ID, style = wx.CB_DROPDOWN | wx.CB_READONLY)
+        # TODO: generalize these techniques, pull in external libraries
+        combo_width.AppendItems(['manual', 'cross-validation', 'plugin'])
+
+        spin_width_ID = wx.NewId()
+        spin_width = FloatSpin(pane, spin_width_ID, value = 0.1, min_val = None, max_val = None) 
+        spin_width.SetFormat('%g') 
+        gbs.Add(combo_kernel, (1,4))
+        gbs.Add(combo_width, (2,4))
+        gbs.Add(spin_width, (3,4))
+
+        self.spin_width = spin_width
 
         ########################################################################
         # Bind Events
         ########################################################################
         pane.Bind(wx.EVT_COMBOBOX, self.on_xscale, id = combo_xscale_ID)
         pane.Bind(wx.EVT_COMBOBOX, self.on_yscale, id = combo_yscale_ID)
-
+        
+        spin = []
+        spin.append( (self.on_spin_xmin, spin_xmin) )
+        spin.append( (self.on_spin_xmax, spin_xmax) )
+        spin.append( (self.on_spin_ymin, spin_ymin) )
+        spin.append( (self.on_spin_ymax, spin_ymax) )
+        spin.append( (self.on_spin_width, spin_width) )
+        for fn, ID in spin:
+            pane.Bind(wx.EVT_SPINCTRL, fn, ID)
+            pane.Bind(wx.EVT_TEXT, fn, ID)
         # Intialize
-        self.get_current()
+        pane.SetSizer(gbs)
+        self.set_default()
+
+    def set_default(self):
+        self.xscale = 'linear'
+        self.yscale = 'linear'
+
+    @property
+    def xscale(self):
+        k = self.combo_xscale.GetSelection()
+        return self.scales[k]
+
+    @xscale.setter
+    def xscale(self, value):
+        """ Sets the xscale of the plot, takes a string input
+        """
+        try:
+            k = self.scales.index(value)
+        except:
+            ValueError("{} is not a valid scale type".format(value))
+        self.combo_xscale.SetSelection(k)
+        self.figure.ax.set_xscale(value)
+    
+    @property
+    def yscale(self):
+        k = self.combo_yscale.GetSelection()
+        return self.scales[k]
+    
+    @yscale.setter
+    def yscale(self, value):
+        """ Sets the xscale of the plot, takes a string input
+        """
+        try:
+            k = self.scales.index(value)
+        except:
+            ValueError("{} is not a valid scale type".format(value))
+        self.combo_yscale.SetSelection(k)
+        self.figure.ax.set_yscale(value)
+
+    @property
+    def xmin(self):
+        return self.spin_xmin.GetValue()
+
+    @xmin.setter
+    def xmin(self, value):
+        self.spin_xmin.SetValue(value)
+        self.figure.ax.set_xlim(left = value)
+    
+    @property
+    def xmax(self):
+        return self.spin_xmax.GetValue()
+
+    @xmax.setter
+    def xmax(self, value):
+        self.spin_xmax.SetValue(value)
+        self.figure.ax.set_xlim(right = value)
+    
+    @property
+    def ymin(self):
+        return self.spin_ymin.GetValue()
+
+    @ymin.setter
+    def ymin(self, value):
+        self.spin_ymin.SetValue(value)
+        self.figure.ax.set_ylim(bottom = value)
+
+    @property
+    def ymax(self):
+        return self.spin_ymax.GetValue()
+
+    @ymax.setter
+    def ymax(self, value):
+        self.spin_ymax.SetValue(value)
+        self.figure.ax.set_ylim(top = value)
+     
+    @property
+    def channel(self):
+        return self._channel
+
+    @channel.setter
+    def channel(self, value = None):
+        self._channel = value
+        self.defaults()
+        self.figure.draw()
+
+    def defaults(self):
+        """ Grab current range of plot"""
+        self.xmin = self.figure.xmin
+        self.xmax = self.figure.xmax
+        self.ymin = self.figure.ymin
+        self.ymax = self.figure.ymax
+        self.xscale = self.xscale
+        self.yscale = self.yscale
+
+    @property
+    def bandwidth(self):
+        return self.spin_width.GetValue()
+    
+    @bandwidth.setter
+    def bandwidth(self, value):
+        self.spin_width.SetValue(value)
+        self.figure.plot(bandwidth = value)
 
     def save(self):
         raise NotImplementedError
@@ -272,43 +438,34 @@ class OneControl:
     def load(self):
         raise NotImplementedError
     
-    def get_current(self):
-        xscale = self.figure.ax.get_xscale()
-        
-
-    def on_xscale(self, event = None, xscale = None):
-        if not event is None:
-            number = self.combo_xscale.GetSelection()
-            xscale = self.scales[number]
-        elif not xscale is None:
-            xscale = xscale
-        else:
-            raise ValueError("Must supply either an event or an xscale")
-
-        try:
-            self.figure.ax.set_xscale(xscale)
-        except:
-            raise NotImplementedError("Scaling {} not implemented".format(xscale))
-        
+    def on_xscale(self, event = None):
+        self.xscale = self.xscale
         self.figure.draw()
     
-    def on_yscale(self, event = None, yscale = None):
-        if not event is None:
-            number = self.combo_yscale.GetSelection()
-            yscale = self.scales[number]
-        elif not xscale is None:
-            yscale = yscale
-        else:
-            raise ValueError("Must supply either an event or an xscale")
-
-        try:
-            self.figure.ax.set_yscale(yscale)
-        except:
-            raise NotImplementedError("Scaling {} not implemented".format(yscale))
-        
+    def on_yscale(self, event = None):
+        self.yscale = self.yscale
         self.figure.draw()
 
+    def on_spin_xmin(self, event = None):
+        self.xmin = self.xmin
+        self.figure.draw()
 
+    def on_spin_xmax(self, event = None):
+        self.xmax = self.xmax
+        self.figure.draw()
+
+    def on_spin_ymin(self, event = None):
+        self.ymin = self.ymin
+        self.figure.draw()
+
+    def on_spin_ymax(self, event = None):
+        self.ymax = self.ymax
+        self.figure.draw()
+
+    def on_spin_width(self, event = None):
+        self.bandwidth = self.bandwidth
+        self.defaults()
+        self.figure.draw()
 
 class TreeData():
     """ A tree for showing gates/masks and multiple file sets
@@ -369,15 +526,24 @@ class OnePlot(wx.Panel):
         self.canvas.SetSize(self.GetSize())
         self.figure.tight_layout(pad=2)
     
-    def plot(self):
+    def plot(self, **kwargs):
         sample = self.parent.sample
         channel = self.parent.channel
         fa = self.parent.fa
         self.ax.cla()
         # TODO: import more control properties here
+        self.xmax = -float('inf')
+        self.xmin = float('inf')
+        self.ymin = float('inf')
+        self.ymax = -float('inf')
+
         for j in sample:
-            (xgrid, den) = fa[j].histogram(channel)
+            (xgrid, den) = fa[j].kde1(channel, **kwargs)
             self.ax.plot(xgrid,den)
+            self.xmin = min(self.xmin, np.amin(xgrid))
+            self.xmax = max(self.xmax, np.amax(xgrid))
+            self.ymin = min(self.ymin, np.amin(den))
+            self.ymax = max(self.ymax, np.amax(den))
         
         self.figure.tight_layout(pad=2)
         self.canvas.draw()

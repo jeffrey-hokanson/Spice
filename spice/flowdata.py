@@ -16,11 +16,21 @@ class FlowData:
         the metadata structure, which we expose to the user via alternatively
         named commands (we seek to avoid the FCS standard of 
     """
+    _kernel_1D_list = ["hat"]
+
     def __init__(self, path = None):
-        (self._data, self._metadata, self._analysis, self._meta_analysis) = \
-            fcs.read(path, True)
-        self._path = path
-        self._filename = os.path.basename(path)
+
+        if not path is None:
+            (self._data, self._metadata, self._analysis, self._meta_analysis) = \
+                fcs.read(path, True)
+            self._path = path
+            self._filename = os.path.basename(path)
+        else:
+            self._data = []
+            self._metadata = {}
+            self._analysis = []
+            self._meta_analysis = {}
+
 
     # Raw accessors for critical
     @property
@@ -86,8 +96,12 @@ class FlowData:
                 self._markers.append(self._metadata.get('$P{}S'.format(j+1), ''))
             return self._markers
 
-    
-    def histogram(self, channel):
+    @property
+    def kernel_1D_list(self):
+        return self._kernel_1D_list
+
+    # TODO: Add memoize decorator to reduce computation time, perhaps also add threading option. 
+    def kde1(self, channel, bandwidth = 0.5):
         """ Generate histogram
         """
         npoints = 10001
@@ -95,7 +109,7 @@ class FlowData:
         data = self.data[channel]
         xmin = np.min(data)
         xmax = np.max(data)
-        bandwidth = 0.5
+        
         den = kde.hat_linear(data, bandwidth, xmin, xmax, npoints)
         xgrid = np.linspace(xmin, xmax, npoints)
         return (xgrid, den)
@@ -139,6 +153,5 @@ class FlowAnalysis:
 
     def __iter__(self):
         return self._fd.__iter__()
-
 
 
