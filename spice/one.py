@@ -26,6 +26,9 @@ from matplotlib.figure import Figure
 from flowdata import FlowData as FlowData
 from flowdata import FlowAnalysis as FlowAnalysis
 
+FS_FORMAT = '%g'
+FS_DIGITS = 3
+
 class OneFrame(wx.Frame):
 
     def __init__(self, *args, **kwargs):
@@ -224,13 +227,16 @@ class OneControl(object):
 
         spin_xcofactor_ID = wx.NewId()
         spin_xcofactor = FloatSpin(pane,spin_xcofactor_ID, value = 5, min_val = None, max_val = None) 
-        spin_xcofactor.SetFormat("%g")
+        spin_xcofactor.SetFormat(FS_FORMAT)
+        spin_xcofactor.SetDigits(FS_DIGITS)
         spin_xmin_ID = wx.NewId()
         spin_xmin = FloatSpin(pane,spin_xmin_ID, value = -1, min_val = None, max_val = None) 
-        spin_xmin.SetFormat("%g")
+        spin_xmin.SetFormat(FS_FORMAT)
+        spin_xmin.SetDigits(FS_DIGITS)
         spin_xmax_ID = wx.NewId()
         spin_xmax = FloatSpin(pane,spin_xmax_ID, value = 100, min_val = None, max_val = None) 
-        spin_xmax.SetFormat("%g")
+        spin_xmax.SetFormat(FS_FORMAT)
+        spin_xmax.SetDigits(FS_DIGITS)
 
         flag = wx.ALIGN_LEFT | wx.ALIGN_CENTER_VERTICAL
         gbs.Add(text_x, (0,1))
@@ -256,15 +262,18 @@ class OneControl(object):
 
         spin_ycofactor_ID = wx.NewId()
         spin_ycofactor = FloatSpin(pane,spin_ycofactor_ID, value = 5, min_val = None, max_val = None) 
-        spin_ycofactor.SetFormat("%g")
+        spin_ycofactor.SetFormat(FS_FORMAT)
+        spin_ycofactor.SetDigits(FS_DIGITS)
         
         spin_ymin_ID = wx.NewId()
         spin_ymin = FloatSpin(pane,spin_ymin_ID, value = -1, min_val = None, max_val = None) 
-        spin_ymin.SetFormat("%g")
+        spin_ymin.SetFormat(FS_FORMAT)
+        spin_ymin.SetDigits(FS_DIGITS)
 
         spin_ymax_ID = wx.NewId()
         spin_ymax = FloatSpin(pane,spin_ymax_ID, value = 100, min_val = None, max_val = None) 
-        spin_ymax.SetFormat("%g")
+        spin_ymax.SetFormat(FS_FORMAT)
+        spin_ymax.SetDigits(FS_DIGITS)
 
         flag = wx.ALIGN_LEFT | wx.ALIGN_CENTER_VERTICAL
         gbs.Add(text_y, (0,2))
@@ -306,7 +315,8 @@ class OneControl(object):
 
         spin_width_ID = wx.NewId()
         spin_width = FloatSpin(pane, spin_width_ID, value = 0.1, min_val = None, max_val = None) 
-        spin_width.SetFormat('%g') 
+        spin_width.SetFormat(FS_FORMAT) 
+        spin_width.SetDigits(FS_DIGITS)
         gbs.Add(combo_kernel, (1,4))
         gbs.Add(combo_width, (2,4))
         gbs.Add(spin_width, (3,4))
@@ -318,13 +328,15 @@ class OneControl(object):
         ########################################################################
         pane.Bind(wx.EVT_COMBOBOX, self.on_xscale, id = combo_xscale_ID)
         pane.Bind(wx.EVT_COMBOBOX, self.on_yscale, id = combo_yscale_ID)
-        
+       
+        # List of Spin boxes to initialize
         spin = []
         spin.append( (self.on_spin_xmin, spin_xmin) )
         spin.append( (self.on_spin_xmax, spin_xmax) )
         spin.append( (self.on_spin_ymin, spin_ymin) )
         spin.append( (self.on_spin_ymax, spin_ymax) )
         spin.append( (self.on_spin_width, spin_width) )
+        spin.append( (self.on_xcofactor, spin_xcofactor) )
         for fn, ID in spin:
             pane.Bind(wx.EVT_SPINCTRL, fn, ID)
             pane.Bind(wx.EVT_TEXT, fn, ID)
@@ -351,6 +363,14 @@ class OneControl(object):
             ValueError("{} is not a valid scale type".format(value))
         self.combo_xscale.SetSelection(k)
         self.figure.ax.set_xscale(value)
+        
+        # Some properties have a separate parameter to set
+        kwargs = {}
+        if value in ['symlog']:
+            kwargs['linthreshx'] = self.xcofactor
+        print kwargs
+        self.figure.ax.set_xscale(value, **kwargs)
+
     
     @property
     def yscale(self):
@@ -366,7 +386,13 @@ class OneControl(object):
         except:
             ValueError("{} is not a valid scale type".format(value))
         self.combo_yscale.SetSelection(k)
-        self.figure.ax.set_yscale(value)
+
+        # Some properties have a separate parameter to set
+        kwargs = {}
+        if value in ['symlog']:
+            kwargs['linthreshy'] = self.ycofactor
+        
+        self.figure.ax.set_yscale(value, **kwargs)
 
     @property
     def xmin(self):
@@ -432,6 +458,15 @@ class OneControl(object):
         self.spin_width.SetValue(value)
         self.figure.plot(bandwidth = value)
 
+    @property
+    def xcofactor(self):
+        return self.spin_xcofactor.GetValue()
+
+    @xcofactor.setter
+    def xcofactor(self, value):
+        self.spin_xcofactor.SetValue(value)
+        self.xscale = self.xscale
+
     def save(self):
         raise NotImplementedError
     
@@ -466,6 +501,11 @@ class OneControl(object):
         self.bandwidth = self.bandwidth
         self.defaults()
         self.figure.draw()
+    
+    def on_xcofactor(self, event = None):
+        self.xcofactor = self.xcofactor
+        self.figure.draw()
+
 
 class TreeData():
     """ A tree for showing gates/masks and multiple file sets
