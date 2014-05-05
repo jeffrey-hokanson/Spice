@@ -101,7 +101,7 @@ class FlowData:
         return self._kernel_1D_list
 
     # TODO: Add memoize decorator to reduce computation time, perhaps also add threading option. 
-    def kde1(self, channel, bandwidth = 0.5):
+    def kde1(self, channel, bandwidth = 0.5, kernel = 'hat'):
         """ Generate histogram
         """
         npoints = 10001
@@ -110,7 +110,8 @@ class FlowData:
         xmin = np.min(data)
         xmax = np.max(data)
         
-        den = kde.hat_linear(data, bandwidth, xmin, xmax, npoints)
+        if kernel == 'hat':
+            den = kde.hat_linear(data, bandwidth, xmin, xmax, npoints)
         xgrid = np.linspace(xmin, xmax, npoints)
         return (xgrid, den)
 
@@ -154,4 +155,8 @@ class FlowAnalysis:
     def __iter__(self):
         return self._fd.__iter__()
 
-
+    @property
+    def nparameters(self):
+        """ Count the number of distinct parameters."""
+        #TOD Fix this
+        return self._fd[0].nparameters

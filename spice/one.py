@@ -95,7 +95,7 @@ class OneFrame(wx.Frame):
         self.cp = cp = wx.CollapsiblePane(self, label="Plotting Controls", style=wx.CP_DEFAULT_STYLE)
 
         # Test code
-        self.control = OneControl(cp.GetPane(), self.figure)
+        self.control = OneControl(cp.GetPane(), self.figure, self.fa)
 
         sizer.Add(self.cp, 0, wx.EXPAND)
 
@@ -112,11 +112,10 @@ class OneFrame(wx.Frame):
         self.Bind(wx.EVT_TOOL, self.plus_channel, id = tb_forward_ID)
         self.Bind(wx.EVT_TOOL, self.minus_channel, id = tb_back_ID)
         self.Bind(wx.EVT_COMBOBOX, self.on_tag_list, id = tb_tag_list_ID)
-        #self.Bind(wx.EVT_CHAR_HOOK, self.on_key)
+        self.Bind(wx.EVT_CHAR_HOOK, self.on_key)
         ######################################################################## 
         # Finalize setup
-        ######################################################################## 
-        
+        ########################################################################  
         self.SetSizer(sizer)
 
     def load(self, filename):
@@ -124,7 +123,7 @@ class OneFrame(wx.Frame):
         self.tree.update()
         self.index = len(self.fa)-1
         self.update_tag_list()
-
+    
     def load_dialog(self, event):
         dlg = wx.FileDialog(self, "Choose an FCS file", os.getcwd(), "", "*.fcs", wx.OPEN)
         if dlg.ShowModal() == wx.ID_OK:
@@ -152,12 +151,10 @@ class OneFrame(wx.Frame):
         if channel is None:
             channel = self._channel
         self._channel = channel
-        
+
         self.tag_list.SetSelection(self.channel)
         # TODO: This will need to call the saved variables
         # and update with current values
-
-        self.figure.plot()
         self.control.channel = channel
 
     def update_tag_list(self):
@@ -177,30 +174,33 @@ class OneFrame(wx.Frame):
         self.set_channel(self.tag_list.GetSelection())
 
     def on_key(self, event):
-        if event.GetKeyCode() == wx.WXK_LEFT:
-            self.minus_channel()
-        elif event.GetKeyCode() == wx.WXK_RIGHT:
-            self.plus_channel()
-
-        else:
-            event.Skip()
-
+        """ Handle keyboard bindings"""
+        # If we are in a window that has its own text control, 
+        # we let that class determine what to do
+        if not issubclass(self.FindFocus().__class__, wx.TextCtrl):
+            if event.GetKeyCode() == wx.WXK_LEFT:
+                self.minus_channel()
+            elif event.GetKeyCode() == wx.WXK_RIGHT:
+                self.plus_channel()
+        event.Skip()
 
 # NB: We inherit from object so that getters/setters will work properly
 class OneControl(object):
     """ A panel containing widgets for controlling the appearance of OnePlot
     """
-    def __init__(self, pane, figure):
+    def __init__(self, pane, figure, fa):
         self.pane = pane
         self.figure = figure
         self._channel = 0
+        self.fa = fa
 
         gbs = wx.GridBagSizer(5, 5)
         
         # Poll avalible scales from matplotlib
         self.scales = scales = matplotlib.scale.get_scale_names()
         self.kernels = kernels = FlowData().kernel_1D_list
-        print kernels
+        self.methods = ['manual']
+        self._properties = {}
         ########################################################################
         # X/Y Control Title Column
         ########################################################################
@@ -308,27 +308,30 @@ class OneControl(object):
         combo_kernel.AppendItems(kernels)
         combo_kernel.SetSize(combo_kernel.GetBestSize())
 
-        combo_width_ID = wx.NewId()
-        combo_width = wx.ComboBox(pane, combo_width_ID, style = wx.CB_DROPDOWN | wx.CB_READONLY)
+        combo_bandwidth_method_ID = wx.NewId()
+        combo_bandwidth_method = wx.ComboBox(pane, combo_bandwidth_method_ID, style = wx.CB_DROPDOWN | wx.CB_READONLY)
         # TODO: generalize these techniques, pull in external libraries
-        combo_width.AppendItems(['manual', 'cross-validation', 'plugin'])
+        combo_bandwidth_method.AppendItems(self.methods)
 
         spin_width_ID = wx.NewId()
         spin_width = FloatSpin(pane, spin_width_ID, value = 0.1, min_val = None, max_val = None) 
         spin_width.SetFormat(FS_FORMAT) 
         spin_width.SetDigits(FS_DIGITS)
         gbs.Add(combo_kernel, (1,4))
-        gbs.Add(combo_width, (2,4))
+        gbs.Add(combo_bandwidth_method, (2,4))
         gbs.Add(spin_width, (3,4))
 
         self.spin_width = spin_width
-
+        self.combo_kernel = combo_kernel
+        self.combo_bandwidth_method = combo_bandwidth_method
         ########################################################################
         # Bind Events
         ########################################################################
         pane.Bind(wx.EVT_COMBOBOX, self.on_xscale, id = combo_xscale_ID)
         pane.Bind(wx.EVT_COMBOBOX, self.on_yscale, id = combo_yscale_ID)
-       
+        pane.Bind(wx.EVT_COMBOBOX, self.on_kernel, id = combo_kernel_ID)
+        pane.Bind(wx.EVT_COMBOBOX, self.on_combo_bandwidth_method, id = combo_bandwidth_method_ID)
+
         # List of Spin boxes to initialize
         spin = []
         spin.append( (self.on_spin_xmin, spin_xmin) )
@@ -337,6 +340,7 @@ class OneControl(object):
         spin.append( (self.on_spin_ymax, spin_ymax) )
         spin.append( (self.on_spin_width, spin_width) )
         spin.append( (self.on_xcofactor, spin_xcofactor) )
+        spin.append( (self.on_ycofactor, spin_ycofactor) )
         for fn, ID in spin:
             pane.Bind(wx.EVT_SPINCTRL, fn, ID)
             pane.Bind(wx.EVT_TEXT, fn, ID)
@@ -347,6 +351,12 @@ class OneControl(object):
     def set_default(self):
         self.xscale = 'linear'
         self.yscale = 'linear'
+        self.xcofactor = 5
+        self.ycofactor = 5
+        self.xmin = 0
+        self.xmax = 1
+        self.ymin = 0
+        self.ymax = 1
 
     @property
     def xscale(self):
@@ -354,22 +364,37 @@ class OneControl(object):
         return self.scales[k]
 
     @xscale.setter
-    def xscale(self, value):
-        """ Sets the xscale of the plot, takes a string input
+    def xscale(self, value = None):
+        """ Sets the xscale of the plot, takes a string input.
         """
         try:
             k = self.scales.index(value)
         except:
             ValueError("{} is not a valid scale type".format(value))
         self.combo_xscale.SetSelection(k)
-        self.figure.ax.set_xscale(value)
-        
+        self._xscale()
+
+    def _xscale(self):
+        """ Sets the xscale property in the figure.
+            This is done separately as several styles have a second variable
+        """
         # Some properties have a separate parameter to set
         kwargs = {}
-        if value in ['symlog']:
+        if self.xscale in ['symlog']:
             kwargs['linthreshx'] = self.xcofactor
-        print kwargs
-        self.figure.ax.set_xscale(value, **kwargs)
+        kwargs['subsx'] = [2, 3, 4, 5, 6, 7, 8, 9]
+        self.figure.ax.set_xscale(self.xscale, **kwargs)
+    
+    def _yscale(self):
+        """ Sets the xscale property in the figure.
+            This is done separately as several styles have a second variable
+        """
+        # Some properties have a separate parameter to set
+        kwargs = {}
+        if self.yscale in ['symlog']:
+            kwargs['linthreshy'] = self.ycofactor
+        kwargs['subsy'] = [2, 3, 4, 5, 6, 7, 8, 9]
+        self.figure.ax.set_yscale(self.yscale, **kwargs)
 
     
     @property
@@ -386,13 +411,8 @@ class OneControl(object):
         except:
             ValueError("{} is not a valid scale type".format(value))
         self.combo_yscale.SetSelection(k)
-
-        # Some properties have a separate parameter to set
-        kwargs = {}
-        if value in ['symlog']:
-            kwargs['linthreshy'] = self.ycofactor
         
-        self.figure.ax.set_yscale(value, **kwargs)
+        self._yscale()
 
     @property
     def xmin(self):
@@ -435,19 +455,106 @@ class OneControl(object):
         return self._channel
 
     @channel.setter
-    def channel(self, value = None):
-        self._channel = value
-        self.defaults()
-        self.figure.draw()
+    def channel(self, chan = None):
+        # Save the current axis configuration
+        self._save_axes(self.channel)
+        self._channel = chan
+        self._set_bandwidth(chan)
+        self.plot()
+        self._set_axes(chan)
+        self.draw()
 
-    def defaults(self):
-        """ Grab current range of plot"""
-        self.xmin = self.figure.xmin
-        self.xmax = self.figure.xmax
-        self.ymin = self.figure.ymin
-        self.ymax = self.figure.ymax
-        self.xscale = self.xscale
-        self.yscale = self.yscale
+    def _set_axes(self, channel):
+        """ Set the current scaling on the desired axes"""
+        if self._properties.has_key(channel):
+            prop = self._properties[channel]
+            self.xmin = prop['xmin']
+            self.xmax = prop['xmax']
+            self.ymin = prop['ymin']
+            self.ymax = prop['ymax']
+            self.xscale = prop['xscale']
+            self.yscale = prop['yscale']
+            self.xcofactor = prop['xcofactor']
+            self.ycofactor = prop['ycofactor']
+            self.bandwidth = prop['bandwidth']
+            self.bandwidth_method = prop['bandwidth_method']
+            self.kernel = prop['kernel']
+        else:
+            # The desired channel does not have a stored configuration
+            self.xmin = self.figure.xmin
+            self.xmax = self.figure.xmax
+            self.ymin = self.figure.ymin
+            self.ymax = self.figure.ymax
+            self.xscale = 'symlog'
+            self.yscale = 'symlog'
+            self.xcofactor = 1
+            self.ycofactor = 1e-5
+            self.bandwidth_method = 'manual'
+            # Special cases
+            tag = self.fa[0].tags[self.channel] 
+            if tag == 'Time':
+                self.xscale = 'linear'
+                self.yscale = 'linear'
+            if tag == 'Cell_length':
+                self.xscale = 'linear'
+                self.yscale = 'linear'
+
+    def _set_bandwidth(self, channel): 
+        """ Change the bandwidth based on channel name on first pass."""
+        if self._properties.has_key(channel):
+            pass
+        else:
+            self.bandwidth = 0.5
+            self.kernel = 'hat'
+            tag = self.fa[0].tags[self.channel]
+            if tag == 'Time':
+                self.bandwidth = 1e3
+            if tag == 'Cell_length':
+                self.bandwidth = 1
+    
+    def _save_axes(self, channel):
+        prop = {}
+        prop['xmin'] = self.xmin
+        prop['xmax'] = self.xmax
+        prop['ymin'] = self.ymin
+        prop['ymax'] = self.ymax
+        prop['xscale'] = self.xscale
+        prop['yscale'] = self.yscale
+        prop['xcofactor'] = self.xcofactor
+        prop['ycofactor'] = self.ycofactor
+        prop['bandwidth'] = self.bandwidth
+        prop['kernel'] = self.kernel
+        prop['bandwidth_method'] = self.bandwidth_method
+        self._properties[channel] = prop
+        
+
+
+    @property
+    def kernel(self):
+        k = self.combo_kernel.GetSelection()
+        return self.kernels[k]
+
+    @kernel.setter
+    def kernel(self, value):
+        try:
+            k = self.kernels.index(value)
+        except:
+            ValueError("{} is not a valid kernel type".format(value))
+        self.combo_kernel.SetSelection(k)
+
+    @property
+    def bandwidth_method(self):
+        k = self.combo_bandwidth_method.GetSelection()
+        return self.methods[k]
+
+    @bandwidth_method.setter
+    def bandwidth_method(self, value):
+        try:
+            k = self.methods.index(value)
+        except:
+            ValueError("{} is not a valid bandwidth method type".format(value))
+        self.combo_bandwidth_method.SetSelection(k)
+
 
     @property
     def bandwidth(self):
@@ -456,7 +563,7 @@ class OneControl(object):
     @bandwidth.setter
     def bandwidth(self, value):
         self.spin_width.SetValue(value)
-        self.figure.plot(bandwidth = value)
+        self.plot()
 
     @property
     def xcofactor(self):
@@ -465,45 +572,67 @@ class OneControl(object):
     @xcofactor.setter
     def xcofactor(self, value):
         self.spin_xcofactor.SetValue(value)
-        self.xscale = self.xscale
+        self._xscale()
+    
+    @property
+    def ycofactor(self):
+        return self.spin_ycofactor.GetValue()
 
-    def save(self):
-        raise NotImplementedError
+    @ycofactor.setter
+    def ycofactor(self, value):
+        self.spin_ycofactor.SetValue(value)
+        self._yscale()
     
-    def load(self):
-        raise NotImplementedError
-    
+
+
     def on_xscale(self, event = None):
         self.xscale = self.xscale
-        self.figure.draw()
+        self.draw()
     
     def on_yscale(self, event = None):
         self.yscale = self.yscale
-        self.figure.draw()
+        self.draw()
 
     def on_spin_xmin(self, event = None):
         self.xmin = self.xmin
-        self.figure.draw()
+        self.draw()
 
     def on_spin_xmax(self, event = None):
         self.xmax = self.xmax
-        self.figure.draw()
+        self.draw()
 
     def on_spin_ymin(self, event = None):
         self.ymin = self.ymin
-        self.figure.draw()
+        self.draw()
 
     def on_spin_ymax(self, event = None):
         self.ymax = self.ymax
-        self.figure.draw()
+        self.draw()
 
     def on_spin_width(self, event = None):
         self.bandwidth = self.bandwidth
-        self.defaults()
-        self.figure.draw()
+        self.draw()
     
     def on_xcofactor(self, event = None):
         self.xcofactor = self.xcofactor
+        self.draw()
+    
+    def on_ycofactor(self, event = None):
+        self.ycofactor = self.ycofactor
+        self.draw()
+
+    def on_kernel(self, event = None):
+        self.kernel = self.kernel
+    
+    def on_combo_bandwidth_method(self, event = None):
+        self.bandwidth_method = self.bandwidth_method
+
+    def plot(self):
+        self.figure.plot(bandwidth = self.bandwidth, kernel = self.kernel)
+
+    def draw(self):
+        """ Transfer all current settings to the figure and draw.
+        """
         self.figure.draw()
 
 
@@ -545,7 +674,7 @@ class OnePlot(wx.Panel):
         This class initilizes a set of controls that appear inside OneFrame
         and then 
     """
-    def __init__(self, parent, *args, **kwargs):
+    def __init__(self, parent,  *args, **kwargs):
         wx.Panel.__init__(self, parent, *args, **kwargs)
 
         # Setup default parameters
@@ -561,21 +690,30 @@ class OnePlot(wx.Panel):
         self.canvas = FigureCanvas(self, -1, self.figure)    
         self.Bind(wx.EVT_SIZE, self._size)
 
+        # Set default variables
+        self.fa = self.parent.fa
 
     def _size(self, event):
         self.canvas.SetSize(self.GetSize())
         self.figure.tight_layout(pad=2)
-    
+
+
     def plot(self, **kwargs):
         sample = self.parent.sample
         channel = self.parent.channel
-        fa = self.parent.fa
-        self.ax.cla()
+        fa = self.fa
+
+        # Clear the current figure
+        for line in self.ax.lines:
+            self.ax.lines.remove(line)
         # TODO: import more control properties here
         self.xmax = -float('inf')
         self.xmin = float('inf')
         self.ymin = float('inf')
         self.ymax = -float('inf')
+        
+        self.lines = []
+
 
         for j in sample:
             (xgrid, den) = fa[j].kde1(channel, **kwargs)
@@ -584,9 +722,8 @@ class OnePlot(wx.Panel):
             self.xmax = max(self.xmax, np.amax(xgrid))
             self.ymin = min(self.ymin, np.amin(den))
             self.ymax = max(self.ymax, np.amax(den))
-        
+
         self.figure.tight_layout(pad=2)
-        self.canvas.draw()
 
     def draw(self):
         self.canvas.draw()
