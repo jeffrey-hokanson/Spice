@@ -658,6 +658,19 @@ class TreeData():
 
         pane.SetSizer(sizer)
 
+        isz = (16,16)
+        img = wx.EmptyImage(1,1)
+        img.SetRGB(0,0,128,128,128)
+        self.img = wx.BitmapFromImage(img.Rescale(isz[0],isz[1]))
+        print self.img
+        il = wx.ImageList(isz[0], isz[1])
+        self.idx = il.Add(self.img)
+        self.tree.SetImageList(il)
+        self.il = il
+        print self.idx
+
+
+
 
     def update(self):
         """ Update the list of loaded files"""
@@ -666,7 +679,8 @@ class TreeData():
         self.children = []
         for fd in self.fa:
             child = self.tree.AppendItem(self.root, fd.filename)
-            self.children.append(child)
+            item = self.children.append(child)
+            self.tree.SetItemImage(child, self.idx)
 
 
 class OnePlot(wx.Panel):
