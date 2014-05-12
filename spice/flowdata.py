@@ -1,4 +1,3 @@
-#i!/usr/bin/env python
 # vim: tabstop=8 expandtab shiftwidth=4 softtabstop=4
 #
 # A package containing a data structure for a single flow cytometry experiment
@@ -30,7 +29,6 @@ class FlowData:
             self._metadata = {}
             self._analysis = []
             self._meta_analysis = {}
-
 
     # Raw accessors for critical
     @property
@@ -74,38 +72,30 @@ class FlowData:
             corresponding FCS file.
         """
         # Cache these values in the vector tags
-        try:
-            return self._tags
-        except AttributeError:
-            self._tags = []
-            for j in range(self.nparameters):
-                self._tags.append(self._metadata['$P{}N'.format(j+1)])
-            return self._tags
+        self._tags = []
+        for j in range(self.nparameters):
+            self._tags.append(self._metadata['$P{}N'.format(j+1)])
+        return self._tags
 
     @property
     def markers(self):
         """ Name of the corresponding marker to each of the tags; e.g., CD45.
             This corresponds to the $PnS section of the FCS file.
         """
-        try:
-            return self._markers
-        except AttributeError:
-            self._markers = []
-            for j in range(self.nparameters):
-                # add markers
-                self._markers.append(self._metadata.get('$P{}S'.format(j+1), ''))
-            return self._markers
+        self._markers = []
+        for j in range(self.nparameters):
+            # add markers
+            self._markers.append(self._metadata.get('$P{}S'.format(j+1), ''))
+        return self._markers
 
     @property
     def kernel_1D_list(self):
         return self._kernel_1D_list
 
     # TODO: Add memoize decorator to reduce computation time, perhaps also add threading option. 
-    def kde1(self, channel, bandwidth = 0.5, kernel = 'hat'):
+    def kde1(self, channel, bandwidth = 0.5, kernel = 'hat', npoints = 10001):
         """ Generate histogram
         """
-        npoints = 10001
-
         data = self.data[channel]
         xmin = np.min(data)
         xmax = np.max(data)
@@ -115,8 +105,40 @@ class FlowData:
         xgrid = np.linspace(xmin, xmax, npoints)
         return (xgrid, den)
 
+    def __getattr__(self, name):
+        """ Provides access to the data channels/markers in their original names
+            (inspired by pandas)
+            e.g.,
+            fd = FlowData('test.fcs')
+            fd.CD45
+            will return the appropreate channel
+        """
+        # TODO: most tags/markers are not valid property names, use regular expressions
+        # to allow these to be called in a normalized fashion
+        # i.e., this should do some name mangling
+        if name in self.tags:
+            return self._data[self.tags.index(name)]
+        if name in self.markers:
+            return self._data[self.markers.index(name)]
+        
+        raise AttributeError("Attribute {} not defined".format(name))
+    
+    def get(self,name):
+        """ Similar to __getattr__, but this formulation can parse pure strings,
+            rather than
+        """
+        if name in self.tags:
+            return self._data[self.tags.index(name)]
+        if name in self.markers:
+            return self._data[self.markers.index(name)]
+        raise AttributeError("Attribute {} not defined".format(name))
+        
 
-
+    def normalize(self):
+        """ Names comming from our lab are not always right, 
+            fix these
+        """
+        raise NotImplementedError
 
 class FlowAnalysis:
     """ A container class for multiple datasets.
@@ -125,11 +147,10 @@ class FlowAnalysis:
     """
     def __init__(self):
         self._fd = []   # Container for flow data
-
     def load(self, filename):
         """Load an fcs file into the analysis set. """
         self._fd.append(FlowData(filename))
-
+        self._fd[-1].color = [0,0,0]
     def list_files(self):
         lf = []
         for fd in self._fd:
@@ -160,3 +181,15 @@ class FlowAnalysis:
         """ Count the number of distinct parameters."""
         #TOD Fix this
         return self._fd[0].nparameters
+
+
+    @property
+    def colors(self):
+        return self._colors
+
+
+class Gate:
+    def __init__(self):
+        self.children = []
+        
+

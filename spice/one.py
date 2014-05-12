@@ -26,6 +26,9 @@ from matplotlib.figure import Figure
 from flowdata import FlowData as FlowData
 from flowdata import FlowAnalysis as FlowAnalysis
 
+# Helper for GUI
+from monoicon import MonoIcon
+
 FS_FORMAT = '%g'
 FS_DIGITS = 3
 
@@ -646,42 +649,67 @@ class TreeData():
         pane.SetDoubleBuffered(True)
         sizer = wx.BoxSizer(wx.VERTICAL)
 
-        self.tree = gizmos.TreeListCtrl(pane, -1, style = wx.TR_DEFAULT_STYLE|wx.TR_FULL_ROW_HIGHLIGHT|
-                        wx.TR_HIDE_ROOT)
+        # to remove the root
+        # wx.TR_HIDE_ROOT
+        self.tree = gizmos.TreeListCtrl(pane, -1, style = wx.TR_DEFAULT_STYLE|
+                wx.TR_FULL_ROW_HIGHLIGHT)
         
         self.tree.AddColumn("File name")
         self.tree.AddColumn("Site")
         self.tree.AddColumn("Time")
         
-        self.root = self.tree.AddRoot("The Root Item")
+        self.root = self.tree.AddRoot("")
         sizer.Add(self.tree, 1, wx.EXPAND)
 
         pane.SetSizer(sizer)
+        
+        self.mi = mi = MonoIcon(16,16)
+        self.tree.SetImageList(mi.GetImageList())
 
-        isz = (16,16)
-        img = wx.EmptyImage(1,1)
-        img.SetRGB(0,0,128,128,128)
-        self.img = wx.BitmapFromImage(img.Rescale(isz[0],isz[1]))
-        print self.img
-        il = wx.ImageList(isz[0], isz[1])
-        self.idx = il.Add(self.img)
-        self.tree.SetImageList(il)
-        self.il = il
-        print self.idx
-
-
+        # This only works on the blank region
+        #self.tree.Bind(wx.EVT_CONTEXT_MENU, self.on_context_menu)
+        self.tree.Bind(wx.EVT_TREE_ITEM_RIGHT_CLICK, self.on_context_menu)
+        #self.tree.Bind(wx.EVT_TREE_ITEM_MENU, self.on_context_menu)
 
 
     def update(self):
         """ Update the list of loaded files"""
         self.tree.DeleteAllItems()
-        self.root = self.tree.AddRoot("Invisible Root")
+        self.root = self.tree.AddRoot("All data")
         self.children = []
         for fd in self.fa:
             child = self.tree.AppendItem(self.root, fd.filename)
             item = self.children.append(child)
-            self.tree.SetItemImage(child, self.idx)
+            fd.label = child
+            self.tree.SetItemImage(child, self.mi[fd.color[0], fd.color[1], fd.color[2]])
+        
+        self.tree.ExpandAll(self.root)
 
+    def on_context_menu(self, event):
+        print event.GetItem()
+        print self.fa[0].label
+
+        if event.GetItem() == self.fa[0].label:
+            print "Match"
+        if not hasattr(self, "on_color_ID"):
+            self.on_color_ID = wx.NewId()
+            
+            self.tree.Bind(wx.EVT_MENU, self.on_color, id = self.on_color_ID) 
+   
+        menu = wx.Menu()
+        menu.Append(self.on_color_ID, "Set Color")
+        self.tree.PopupMenu(menu)
+        menu.Destroy()
+
+    def on_color(self, event):
+        dlg = wx.ColourDialog(self.parent)
+        dlg.GetColourData().SetChooseFull(True)
+
+        if dlg.ShowModal() == wx.ID_OK:
+            data = dlg.GetColourData()
+            color = data.GetColour().Get()
+            print color
+        dlg.Destroy()
 
 class OnePlot(wx.Panel):
     """ A pane for one dimensional plotting.
