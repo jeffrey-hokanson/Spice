@@ -38,18 +38,23 @@ FS_FORMAT = '%g'
 FS_DIGITS = 3
 
 class OneFrame(wx.Frame):
-    def __init__(self, *args, **kwargs):
+    def __init__(self, parent, flow_analysis = None,  *args, **kwargs):
         self.log = logging.getLogger('OneFrame')
+        kwargs['parent'] = parent
         wx.Frame.__init__(self, *args, **kwargs)
 
         # Storage of data
-        self.fa = FlowAnalysis()
+        if flow_analysis is None:
+            self.fa = FlowAnalysis()
+        else:
+            self.fa = flow_analysis
         
         # Default Variables: these are not to be written to,
         # as the memory is shared throughout the program
         self._channel = 0
         self._sample = [0]
-
+        self.parent = parent
+        self.children = []
         ######################################################################## 
         # Create the toolbar on the main window
         ######################################################################## 
@@ -61,6 +66,7 @@ class OneFrame(wx.Frame):
         tb_save_ID = wx.NewId()
         tb_export_ID = wx.NewId()
         tb_load_ID = wx.NewId()
+        tb_new_window_ID = wx.NewId()
 
         # Toolbar
         self.toolbar = self.CreateToolBar(wx.TB_HORIZONTAL | wx.NO_BORDER | wx.TB_FLAT)
@@ -70,10 +76,11 @@ class OneFrame(wx.Frame):
         tb_forward =  wx.ArtProvider.GetBitmap(wx.ART_GO_FORWARD, wx.ART_TOOLBAR, tb_size)
         tb_save = wx.ArtProvider.GetBitmap(wx.ART_FILE_SAVE, wx.ART_TOOLBAR, tb_size)
         tb_load = wx.ArtProvider.GetBitmap(wx.ART_FILE_OPEN, wx.ART_TOOLBAR, tb_size)
-
+        tb_new_window = wx.ArtProvider.GetBitmap(wx.ART_NEW, wx.ART_TOOLBAR, tb_size)
         # List of Tags
         self.tag_list = wx.ComboBox(self.toolbar, tb_tag_list_ID, size = (300,-1), style = wx.CB_DROPDOWN | wx.CB_READONLY)
 
+        self.toolbar.AddLabelTool(tb_new_window_ID, "New Window", tb_new_window)
         self.toolbar.AddLabelTool(tb_load_ID, "Load", tb_load, shortHelp = "Load FCS", longHelp = "")
         self.toolbar.AddLabelTool(tb_save_ID, "Export Plot", tb_save, shortHelp = "Export Plot to PNG, JPG, etc", longHelp = "")
         self.toolbar.AddStretchableSpace()
@@ -116,6 +123,7 @@ class OneFrame(wx.Frame):
         # Bind Events
         ######################################################################## 
 
+        self.Bind(wx.EVT_TOOL, self.new_window, id = tb_new_window_ID) 
         self.Bind(wx.EVT_TOOL, self.load_dialog, id = tb_load_ID) 
         self.Bind(wx.EVT_TOOL, self.plus_channel, id = tb_forward_ID)
         self.Bind(wx.EVT_TOOL, self.minus_channel, id = tb_back_ID)
@@ -138,7 +146,23 @@ class OneFrame(wx.Frame):
             path = dlg.GetPath()
             self.load(path) 
         dlg.Destroy()
-        
+
+    def new_window(self, event):
+        """
+            Generate a new window to look at data.
+            Currently, we implement this as a set of children off the parent window
+            to avoid graph traversing (although that may be necessary later).
+        """
+        if self.parent is None: 
+            child = OneFrame(self, flow_analysis = self.fa, title = 'Child', size=(640,480))
+            self.children.append(child)
+            child.tree.update()
+            child.update_tag_list()
+            child.Show()
+        else:
+            self.parent.new_window()
+
+
     @property
     def channel(self):
         return self._channel
@@ -192,8 +216,16 @@ class OneFrame(wx.Frame):
                 self.plus_channel()
         event.Skip()
 
-    def on_color(self, event = None):
+    def on_color(self, event = None, origin = None):
+        # A plot has changed colors, apply globally
+        #TODO BUGS ARE HERE
         self.figure.on_color()
+        if not origin == self: 
+            if self.parent is None:
+                for c in self.children:
+                    c.on_color(origin = self)
+            else:
+                self.parent.on_color()
 
 # NB: We inherit from object so that getters/setters will work properly
 class OneControl(object):
@@ -707,14 +739,21 @@ class TreeData():
         self.tree.DeleteAllItems()
         root_name = self.fa.gate_tree.title
         self.root = self.tree.AddRoot(root_name)
-        self.fa.gate_tree.widget = self.root
+        self.fa.gate_tree.widget = []
+        self.fa.gate_tree.widget.append(self.root)
  
         def walk(tree_parent, widget_parent):
             title = tree_parent.title
             widget_node = self.tree.AppendItem(widget_parent, title)
             color = tree_parent.color
             self.tree.SetItemImage(widget_node, self.mi[color[0], color[1], color[2]])
-            tree_parent.widget = widget_node
+            # TODO: We need to clear out references to removed widgets
+            if hasattr(tree_parent, 'widget'):
+                tree_parent.widget.append(widget_node)
+            else:
+                tree_parent.widget = []
+                tree_parent.widget.append(widget_node)
+
             for c in tree_parent.children:
                 walk(c, widget_node)
 
@@ -724,10 +763,12 @@ class TreeData():
         self.tree.ExpandAll(self.root)
 
     def on_context_menu(self, event):
-        t = self.fa.gate_tree.findChild( lambda t: t.widget == event.GetItem())
+        t = self.fa.gate_tree.findChild( lambda t: event.GetItem() in t.widget)
         
-        if not hasattr(self, "on_color_ID"):
-            self.on_color_ID = wx.NewId()
+        if t is None:
+            self.log.error("Found no matching widget type to the event")
+        #if not hasattr(self, "on_color_ID"):
+        self.on_color_ID = wx.NewId()
             
         self.tree.Bind(wx.EVT_MENU, lambda event: self.on_color(event, t), id = self.on_color_ID) 
         menu = wx.Menu()
@@ -737,7 +778,7 @@ class TreeData():
         # Cleanup
         menu.Destroy()
         # I think I need to unbind the events as I will re-binding them later
-        self.tree.Unbind(wx.EVT_MENU, id = self.on_color_ID)
+        #self.tree.Unbind(wx.EVT_MENU, id = self.on_color_ID)
         
 
     def on_color(self, event, t):
@@ -752,8 +793,6 @@ class TreeData():
         t.color = color
         self.update()
         self.parent.on_color()
-        #self.parent.figure.plot()
-        #self.parent.figure.draw()
 
 class OnePlot(wx.Panel):
     """ A pane for one dimensional plotting.
