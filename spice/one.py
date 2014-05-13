@@ -654,9 +654,9 @@ class TreeData():
         self.tree = gizmos.TreeListCtrl(pane, -1, style = wx.TR_DEFAULT_STYLE|
                 wx.TR_FULL_ROW_HIGHLIGHT)
         
-        self.tree.AddColumn("File name")
-        self.tree.AddColumn("Site")
-        self.tree.AddColumn("Time")
+        self.tree.AddColumn("Gate Name")
+        self.tree.AddColumn("Relation")
+        self.tree.AddColumn("Population")
         
         self.root = self.tree.AddRoot("")
         sizer.Add(self.tree, 1, wx.EXPAND)
@@ -673,35 +673,42 @@ class TreeData():
 
 
     def update(self):
-        """ Update the list of loaded files"""
+        """ Update the list of loaded files and gates"""
         self.tree.DeleteAllItems()
-        self.root = self.tree.AddRoot("All data")
-        self.children = []
-        for fd in self.fa:
-            child = self.tree.AppendItem(self.root, fd.filename)
-            item = self.children.append(child)
-            fd.label = child
-            self.tree.SetItemImage(child, self.mi[fd.color[0], fd.color[1], fd.color[2]])
-        
+        root_name = self.fa.gate_tree.gate.title
+        self.root = self.tree.AddRoot(root_name)
+        self.fa.gate_tree.widget = self.root
+ 
+        def walk(tree_parent, widget_parent):
+            title = tree_parent.gate.title
+            widget_node = self.tree.AppendItem(widget_parent, title)
+            color = tree_parent.gate.color
+            self.tree.SetItemImage(widget_node, self.mi[color[0], color[1], color[2]])
+            tree_parent.widget = widget_node
+            for c in tree_parent.children:
+                walk(c, widget_node)
+
+        for c in self.fa.gate_tree.children:
+            walk(c, self.root)     
+ 
         self.tree.ExpandAll(self.root)
 
     def on_context_menu(self, event):
         print event.GetItem()
-        print self.fa[0].label
-
-        if event.GetItem() == self.fa[0].label:
-            print "Match"
+        t = self.fa.gate_tree.findChild( lambda t: t.widget == event.GetItem())
+        print t
+        
         if not hasattr(self, "on_color_ID"):
             self.on_color_ID = wx.NewId()
             
-            self.tree.Bind(wx.EVT_MENU, self.on_color, id = self.on_color_ID) 
+        self.tree.Bind(wx.EVT_MENU, lambda event: self.on_color(event, t), id = self.on_color_ID) 
    
         menu = wx.Menu()
         menu.Append(self.on_color_ID, "Set Color")
         self.tree.PopupMenu(menu)
         menu.Destroy()
 
-    def on_color(self, event):
+    def on_color(self, event, t):
         dlg = wx.ColourDialog(self.parent)
         dlg.GetColourData().SetChooseFull(True)
 
@@ -710,6 +717,8 @@ class TreeData():
             color = data.GetColour().Get()
             print color
         dlg.Destroy()
+        t.gate.color = color
+        self.update()
 
 class OnePlot(wx.Panel):
     """ A pane for one dimensional plotting.

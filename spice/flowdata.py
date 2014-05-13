@@ -4,9 +4,15 @@
 
 import os
 import numpy as np
-import fcs
+#import pandas as pd
 
+import fcs
 from kde import kde
+
+from tinytree import Tree
+
+
+
 
 class FlowData:
     """ A container class for flow cytometry data.
@@ -147,10 +153,17 @@ class FlowAnalysis:
     """
     def __init__(self):
         self._fd = []   # Container for flow data
+        self.gate_tree = Tree()
+        # We never display the root node plot
+        self.gate_tree.gate = Gate(title = "All Data", active = False)
+
     def load(self, filename):
         """Load an fcs file into the analysis set. """
         self._fd.append(FlowData(filename))
-        self._fd[-1].color = [0,0,0]
+        t = Tree()
+        t.gate =  Gate(index=len(self._fd), title=filename)
+        self.gate_tree.addChild(t)
+    
     def list_files(self):
         lf = []
         for fd in self._fd:
@@ -183,13 +196,29 @@ class FlowAnalysis:
         return self._fd[0].nparameters
 
 
-    @property
-    def colors(self):
-        return self._colors
-
-
 class Gate:
-    def __init__(self):
-        self.children = []
+    def __init__(self, index = None, channels = None, func = None, title='', active = True): 
+        """
+            Takes in a list of channel names (strings) and a lambda function 
+            taking an equal number of arguments.
+            
+            index - index of the dataset in the vector fd
+            channel - which channels to select 
+            func - filter to apply
+            title - Used for display purposes
+            active - if gate should be visible or not
+        """
+        self.index = index
+        self.channels = channels
+        self.func = func
+        self.color = [0, 0, 0]
+        self.title = title
+
+    def apply(self, flow_analysis):
+        fa = flow_analysis
+        fd = fa[self.index]
         
 
+
+
+        
