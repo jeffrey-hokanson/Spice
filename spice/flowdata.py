@@ -5,14 +5,11 @@
 import os
 import numpy as np
 #import pandas as pd
-
+from functools32 import lru_cache
 import fcs
 from kde import kde
 
 from tinytree import Tree
-
-
-
 
 class FlowData:
     """ A container class for flow cytometry data.
@@ -99,6 +96,7 @@ class FlowData:
         return self._kernel_1D_list
 
     # TODO: Add memoize decorator to reduce computation time, perhaps also add threading option. 
+    @lru_cache(maxsize=1000)
     def kde1(self, channel, bandwidth = 0.5, kernel = 'hat', npoints = 10001):
         """ Generate histogram
         """
@@ -150,18 +148,33 @@ class FlowAnalysis:
     """ A container class for multiple datasets.
         This largely emulates a list, but we are leaving the option open
         for later complexity
+
+
+
+        gate_tree - an instance of tinytree, with the following properties
+            added to each node
+
+            active = should plot be displayed
+            color = RGB255 color of the plot
+            gate = data structure for applying gating/masking of data
+            title = title to display with the gate
     """
     def __init__(self):
         self._fd = []   # Container for flow data
-        self.gate_tree = Tree()
+        self.gate_tree = GateTree()
         # We never display the root node plot
-        self.gate_tree.gate = Gate(title = "All Data", active = False)
+        self.gate_tree.active = False
+        self.gate_tree.color = [0, 0, 0]
+        self.gate_tree.title = "All Data"
 
     def load(self, filename):
         """Load an fcs file into the analysis set. """
         self._fd.append(FlowData(filename))
-        t = Tree()
-        t.gate =  Gate(index=len(self._fd), title=filename)
+        t = GateTree()
+        t.active = True
+        t.color = [0, 0, 0]
+        t.title = self._fd[-1].filename
+        t.gate_index(len(self._fd) - 1)
         self.gate_tree.addChild(t)
     
     def list_files(self):
@@ -196,29 +209,45 @@ class FlowAnalysis:
         return self._fd[0].nparameters
 
 
-class Gate:
-    def __init__(self, index = None, channels = None, func = None, title='', active = True): 
-        """
-            Takes in a list of channel names (strings) and a lambda function 
-            taking an equal number of arguments.
-            
-            index - index of the dataset in the vector fd
-            channel - which channels to select 
-            func - filter to apply
-            title - Used for display purposes
-            active - if gate should be visible or not
-        """
-        self.index = index
-        self.channels = channels
-        self.func = func
-        self.color = [0, 0, 0]
-        self.title = title
+    @property
+    def flow_data(self):
+        return self._fd
 
-    def apply(self, flow_analysis):
-        fa = flow_analysis
-        fd = fa[self.index]
+
+class GateTree(Tree):
+    """
+        Stores information for selecting nested subsets.  Each subset is 
+        choosen by a 'gate', either specifying 
+            - A particular data set (FlowData)
+            - a subset selection rule based on channels
+        These are mutually exclusive, and the main function, gate will
+        either return a list of FlowData types, gated, or a single FlowData
+        type.
+
+        The two basic use cases are global gates, that apply a gate to every
+        FlowData in the list (e.g., filtering dead cells), or applying a 
+        particular gate to one set of data. 
+    """
+
+
+
+    def __init__(self, children = None):
+        super(GateTree, self).__init__(children)
+        self.index = None
+    
+    def gate(self, flow_data):
+        """
+            Traverse the tree, applying appropreate gates at each level.
+
+            Returns a FlowData type structure 
+        """
+        # check if index is a single integer
+        if not self.index is None:
+            return flow_data[self.index] 
+
         
-
+    def gate_index(self, index):
+        self.index = index
 
 
         

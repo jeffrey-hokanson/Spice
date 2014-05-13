@@ -29,14 +29,19 @@ from flowdata import FlowAnalysis as FlowAnalysis
 # Helper for GUI
 from monoicon import MonoIcon
 
+# Logging
+import logging
+logging.basicConfig(level = logging.DEBUG)
+
+
 FS_FORMAT = '%g'
 FS_DIGITS = 3
 
 class OneFrame(wx.Frame):
-
     def __init__(self, *args, **kwargs):
+        self.log = logging.getLogger('OneFrame')
         wx.Frame.__init__(self, *args, **kwargs)
-        
+
         # Storage of data
         self.fa = FlowAnalysis()
         
@@ -187,14 +192,19 @@ class OneFrame(wx.Frame):
                 self.plus_channel()
         event.Skip()
 
+    def on_color(self, event = None):
+        self.figure.on_color()
+
 # NB: We inherit from object so that getters/setters will work properly
 class OneControl(object):
     """ A panel containing widgets for controlling the appearance of OnePlot
     """
     def __init__(self, pane, figure, fa):
+        self.log = logging.getLogger('OneControl')
+
         self.pane = pane
         self.figure = figure
-        self._channel = 0
+        self._channel = None
         self.fa = fa
 
         gbs = wx.GridBagSizer(5, 5)
@@ -461,14 +471,19 @@ class OneControl(object):
     def channel(self, chan = None):
         # Save the current axis configuration
         self._save_axes(self.channel)
+        self.log.debug('Changing channel from {} to {}'.format(self._channel, chan))
+
         self._channel = chan
-        self._set_bandwidth(chan)
+        self._get_bandwidth(chan)
         self.plot()
-        self._set_axes(chan)
+        self._load_axes(chan)
+
         self.draw()
 
-    def _set_axes(self, channel):
-        """ Set the current scaling on the desired axes"""
+    def _load_axes(self, channel):
+        """ Set the current scaling on the desired axes.
+            This is called after plotting and may pull in ranges from the plot
+        """
         if self._properties.has_key(channel):
             prop = self._properties[channel]
             self.xmin = prop['xmin']
@@ -502,19 +517,29 @@ class OneControl(object):
                 self.xscale = 'linear'
                 self.yscale = 'linear'
 
-    def _set_bandwidth(self, channel): 
-        """ Change the bandwidth based on channel name on first pass."""
+    def _get_bandwidth(self, channel):
         if self._properties.has_key(channel):
-            pass
+            prop = self._properties[channel]
+            self.kernel = prop['kernel']
+            self.bandwidth = prop['bandwidth']
         else:
-            self.bandwidth = 0.5
             self.kernel = 'hat'
+            self.bandwidth = 0.5
             tag = self.fa[0].tags[self.channel]
             if tag == 'Time':
                 self.bandwidth = 1e3
             if tag == 'Cell_length':
                 self.bandwidth = 1
-    
+
+    def _update_range(self):
+        """ 
+            After plotting a new range, we select the scales
+        """
+        self.xmin = self.figure.xmin
+        self.xmax = self.figure.xmax
+        self.ymin = self.figure.ymin
+        self.ymax = self.figure.ymax
+
     def _save_axes(self, channel):
         prop = {}
         prop['xmin'] = self.xmin
@@ -566,7 +591,6 @@ class OneControl(object):
     @bandwidth.setter
     def bandwidth(self, value):
         self.spin_width.SetValue(value)
-        self.plot()
 
     @property
     def xcofactor(self):
@@ -586,8 +610,6 @@ class OneControl(object):
         self.spin_ycofactor.SetValue(value)
         self._yscale()
     
-
-
     def on_xscale(self, event = None):
         self.xscale = self.xscale
         self.draw()
@@ -614,6 +636,7 @@ class OneControl(object):
 
     def on_spin_width(self, event = None):
         self.bandwidth = self.bandwidth
+        self.plot()
         self.draw()
     
     def on_xcofactor(self, event = None):
@@ -629,8 +652,11 @@ class OneControl(object):
     
     def on_combo_bandwidth_method(self, event = None):
         self.bandwidth_method = self.bandwidth_method
+        self.plot()
+        self.draw()
 
     def plot(self):
+        self.log.debug('Called OneControl.plot')
         self.figure.plot(bandwidth = self.bandwidth, kernel = self.kernel)
 
     def draw(self):
@@ -653,11 +679,15 @@ class TreeData():
         # wx.TR_HIDE_ROOT
         self.tree = gizmos.TreeListCtrl(pane, -1, style = wx.TR_DEFAULT_STYLE|
                 wx.TR_FULL_ROW_HIGHLIGHT)
-        
+    
+ 
         self.tree.AddColumn("Gate Name")
         self.tree.AddColumn("Relation")
         self.tree.AddColumn("Population")
-        
+    
+        self.tree.SetMainColumn(0)
+        self.tree.SetColumnWidth(0,400)
+    
         self.root = self.tree.AddRoot("")
         sizer.Add(self.tree, 1, wx.EXPAND)
 
@@ -675,14 +705,14 @@ class TreeData():
     def update(self):
         """ Update the list of loaded files and gates"""
         self.tree.DeleteAllItems()
-        root_name = self.fa.gate_tree.gate.title
+        root_name = self.fa.gate_tree.title
         self.root = self.tree.AddRoot(root_name)
         self.fa.gate_tree.widget = self.root
  
         def walk(tree_parent, widget_parent):
-            title = tree_parent.gate.title
+            title = tree_parent.title
             widget_node = self.tree.AppendItem(widget_parent, title)
-            color = tree_parent.gate.color
+            color = tree_parent.color
             self.tree.SetItemImage(widget_node, self.mi[color[0], color[1], color[2]])
             tree_parent.widget = widget_node
             for c in tree_parent.children:
@@ -694,19 +724,21 @@ class TreeData():
         self.tree.ExpandAll(self.root)
 
     def on_context_menu(self, event):
-        print event.GetItem()
         t = self.fa.gate_tree.findChild( lambda t: t.widget == event.GetItem())
-        print t
         
         if not hasattr(self, "on_color_ID"):
             self.on_color_ID = wx.NewId()
             
         self.tree.Bind(wx.EVT_MENU, lambda event: self.on_color(event, t), id = self.on_color_ID) 
-   
         menu = wx.Menu()
         menu.Append(self.on_color_ID, "Set Color")
         self.tree.PopupMenu(menu)
+        
+        # Cleanup
         menu.Destroy()
+        # I think I need to unbind the events as I will re-binding them later
+        self.tree.Unbind(wx.EVT_MENU, id = self.on_color_ID)
+        
 
     def on_color(self, event, t):
         dlg = wx.ColourDialog(self.parent)
@@ -717,8 +749,11 @@ class TreeData():
             color = data.GetColour().Get()
             print color
         dlg.Destroy()
-        t.gate.color = color
+        t.color = color
         self.update()
+        self.parent.on_color()
+        #self.parent.figure.plot()
+        #self.parent.figure.draw()
 
 class OnePlot(wx.Panel):
     """ A pane for one dimensional plotting.
@@ -727,7 +762,7 @@ class OnePlot(wx.Panel):
     """
     def __init__(self, parent,  *args, **kwargs):
         wx.Panel.__init__(self, parent, *args, **kwargs)
-
+        self.log = logging.getLogger('OnePlot')
         # Setup default parameters
         self.parent = parent
 
@@ -743,11 +778,20 @@ class OnePlot(wx.Panel):
 
         # Set default variables
         self.fa = self.parent.fa
+        
+        self.xmax = -float('inf')
+        self.xmin = float('inf')
+        self.ymin = float('inf')
+        self.ymax = -float('inf')
+
+        if len(self.fa) > 0:
+            self.plot()
+            self.draw()
+
 
     def _size(self, event):
         self.canvas.SetSize(self.GetSize())
         self.figure.tight_layout(pad=2)
-
 
     def plot(self, **kwargs):
         sample = self.parent.sample
@@ -755,26 +799,59 @@ class OnePlot(wx.Panel):
         fa = self.fa
 
         # Clear the current figure
-        for line in self.ax.lines:
-            self.ax.lines.remove(line)
+        self.ax.cla()
         # TODO: import more control properties here
         self.xmax = -float('inf')
         self.xmin = float('inf')
         self.ymin = float('inf')
         self.ymax = -float('inf')
         
-        self.lines = []
+        for k in kwargs.keys():
+            self.log.debug('Plot option {}: {}'.format(k, kwargs[k]))
 
+        # Plot all the items in active gates by decending the tree
+        def walk(parent, flow_data):
+            if parent.active:
+                color = parent.color
+                color = [color[0]/255., color[1]/255., color[2]/255.]
 
-        for j in sample:
-            (xgrid, den) = fa[j].kde1(channel, **kwargs)
-            self.ax.plot(xgrid,den)
-            self.xmin = min(self.xmin, np.amin(xgrid))
-            self.xmax = max(self.xmax, np.amax(xgrid))
-            self.ymin = min(self.ymin, np.amin(den))
-            self.ymax = max(self.ymax, np.amax(den))
+                fd = parent.gate(flow_data)
+                (xgrid, den) = fd.kde1(channel, **kwargs)
+                # Bound check
+                self.xmin = min(self.xmin, np.amin(xgrid))
+                self.xmax = max(self.xmax, np.amax(xgrid))
+                self.ymin = min(self.ymin, np.amin(den))
+                self.ymax = max(self.ymax, np.amax(den))
+        
+                self.ax.plot(xgrid, den, color = color)
+                self.log.info('Drawing line for {}'.format(parent.title))
+                  
+            for c in parent.children:
+                walk(c, flow_data)
 
+        walk(fa.gate_tree, fa.flow_data)
+        
         self.figure.tight_layout(pad=2)
+
+    def on_color(self):
+        """
+            If there has been a change of colors, we don't need to call the
+            plot function, only edit the properties of the lines in place
+        """
+        lines = self.ax.get_lines()
+        def walk(parent):
+            if parent.active:
+                color = parent.color
+                color = [color[0]/255., color[1]/255., color[2]/255.]
+                line = lines.pop(0)
+                line.set_color(color)
+
+            for c in parent.children:
+                j = walk(c)
+
+        walk(self.fa.gate_tree)
+        self.draw()
+
 
     def draw(self):
         self.canvas.draw()
