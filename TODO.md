@@ -5,7 +5,9 @@ Stage 1
 In this phase, I focus primarily on questions of user interaction.  
 
 
-- Pandas backend for fast gating, a good editing of FlowData is probabily necessary.
+X Pandas backend for fast gating, a good editing of FlowData is probabily necessary.
+	- Pandas is too slow (10x over plain numpy.ndarray) according to our tests. Instead, I will 
+	  use a similar API for FlowData (namely, .get(key)) to enable later interfacing.
 - GUI interface for adding gates
 	- Pop-up inequality gating
 	- Selecting a region graphically

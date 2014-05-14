@@ -68,6 +68,7 @@ class OneFrame(wx.Frame):
         tb_export_ID = wx.NewId()
         tb_load_ID = wx.NewId()
         tb_new_window_ID = wx.NewId()
+        tb_gate_bound_ID = wx.NewId()
 
         # Toolbar
         self.toolbar = self.CreateToolBar(wx.TB_HORIZONTAL | wx.NO_BORDER | wx.TB_FLAT)
@@ -85,6 +86,7 @@ class OneFrame(wx.Frame):
         self.toolbar.AddLabelTool(tb_new_window_ID, "New Window", tb_new_window)
         self.toolbar.AddLabelTool(tb_load_ID, "Load", tb_load, shortHelp = "Load FCS", longHelp = "")
         self.toolbar.AddLabelTool(tb_save_ID, "Export Plot", tb_save, shortHelp = "Export Plot to PNG, JPG, etc", longHelp = "")
+        self.toolbar.AddLabelTool(tb_gate_bound_ID, "Bound Gate", tb_new_window)
         self.toolbar.AddStretchableSpace()
         self.toolbar.AddControl(self.tag_list)
         self.toolbar.AddStretchableSpace()
@@ -110,23 +112,20 @@ class OneFrame(wx.Frame):
         ######################################################################## 
        
         self.cp = cp = wx.CollapsiblePane(self, label="Plotting Controls", style=wx.CP_DEFAULT_STYLE)
-
-        # Test code
         self.control = OneControl(cp.GetPane(), self.figure, self.fa)
-
         sizer.Add(self.cp, 0, wx.EXPAND)
-
         self.cp2 = cp2 = wx.CollapsiblePane(self, label="Gating Tree", style=wx.CP_DEFAULT_STYLE)
-        
         self.tree = TreeData(cp2.GetPane(), self)
-
         sizer.Add(self.cp2, 0, wx.EXPAND)
+        
         ######################################################################## 
         # Bind Events
         ######################################################################## 
 
         self.Bind(wx.EVT_TOOL, self.new_window, id = tb_new_window_ID) 
         self.Bind(wx.EVT_TOOL, self.load_dialog, id = tb_load_ID) 
+        self.Bind(wx.EVT_TOOL, self.on_gate_bound, id = tb_gate_bound_ID)
+
         self.Bind(wx.EVT_TOOL, self.plus_channel, id = tb_forward_ID)
         self.Bind(wx.EVT_TOOL, self.minus_channel, id = tb_back_ID)
         self.Bind(wx.EVT_COMBOBOX, self.on_tag_list, id = tb_tag_list_ID)
@@ -240,7 +239,27 @@ class OneFrame(wx.Frame):
         if active:
             self.figure.on_color()
             self.tree.update()
-            
+           
+    def on_gate_bound(self, event = None):
+        dlg = OnGateBound()
+        
+        if dlg.ShowModal() == wx.ID_OK:
+            # get data
+            pass 
+        dlg.Destroy()
+
+class OnGateBound(wx.Frame):
+    def __init__(self, parent, id):
+        wx.Frame.__init__(self, parent, id, "Pick a bound", (-1,-1), wx.Size(250,50))
+        panel = wx.Panel(self, -1)
+        box = wx.BoxSizer(wx.HORIZONTAL)
+        tag_list_ID = wx.NewId()
+        self.tag_list = wx.ComboBox(panel, tag_list_ID, size = (200, -1), style = wx.CB_DROPDOWN | wx.CB_READONLY)
+        box.Add(self.tag_list)
+
+        self.Centre() 
+
+
 
 # NB: We inherit from object so that getters/setters will work properly
 class OneControl(object):
