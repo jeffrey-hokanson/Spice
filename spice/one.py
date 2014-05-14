@@ -701,6 +701,14 @@ class OneControl(object):
     def plot(self):
         self.log.debug('Called OneControl.plot')
         self.figure.plot(bandwidth = self.bandwidth, kernel = self.kernel)
+        self.xmin = self.xmin
+        self.xmax = self.xmax
+        self.ymin = self.ymin
+        self.ymax = self.ymax
+        self.xscale = self.xscale
+        self.yscale = self.yscale
+        self.xcofactor = self.xcofactor
+        self.ycofactor = self.ycofactor
 
     def draw(self):
         """ Transfer all current settings to the figure and draw.
