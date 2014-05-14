@@ -77,7 +77,8 @@ class OneFrame(wx.Frame):
         tb_forward =  wx.ArtProvider.GetBitmap(wx.ART_GO_FORWARD, wx.ART_TOOLBAR, tb_size)
         tb_save = wx.ArtProvider.GetBitmap(wx.ART_FILE_SAVE, wx.ART_TOOLBAR, tb_size)
         tb_load = wx.ArtProvider.GetBitmap(wx.ART_FILE_OPEN, wx.ART_TOOLBAR, tb_size)
-        tb_new_window = wx.ArtProvider.GetBitmap(wx.ART_NEW, wx.ART_TOOLBAR, tb_size)
+        tb_new_window = wx.Image('icons/1400108720_filefind.png',wx.BITMAP_TYPE_PNG).ConvertToBitmap()
+        #wx.ArtProvider.GetBitmap(wx.ART_NEW, wx.ART_TOOLBAR, tb_size)
         # List of Tags
         self.tag_list = wx.ComboBox(self.toolbar, tb_tag_list_ID, size = (300,-1), style = wx.CB_DROPDOWN | wx.CB_READONLY)
 
@@ -211,11 +212,14 @@ class OneFrame(wx.Frame):
         """ Handle keyboard bindings"""
         # If we are in a window that has its own text control, 
         # we let that class determine what to do
-        if not issubclass(self.FindFocus().__class__, wx.TextCtrl):
-            if event.GetKeyCode() == wx.WXK_LEFT:
-                self.minus_channel()
-            elif event.GetKeyCode() == wx.WXK_RIGHT:
-                self.plus_channel()
+        self.log.debug('Focus object: {}, window focus {}'.format(self.FindFocus().__class__, self.IsActive()))
+
+        if self.IsActive():
+            if not issubclass(self.FindFocus().__class__, wx.TextCtrl):
+                if event.GetKeyCode() == wx.WXK_LEFT:
+                    self.minus_channel()
+                elif event.GetKeyCode() == wx.WXK_RIGHT:
+                    self.plus_channel()
         event.Skip()
 
     def on_color(self, event = None, active = False):
