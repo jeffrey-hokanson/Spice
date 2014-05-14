@@ -17,6 +17,12 @@ class FlowData:
         Our primary design decision is to keep most of the parameters inside 
         the metadata structure, which we expose to the user via alternatively
         named commands (we seek to avoid the FCS standard of 
+
+        For later compatability with Pandas (but we've avoided due to speed penalties),
+        we've added the following functions
+            .get
+            [ ] - returns slice of matrix based on rows
+
     """
     _kernel_1D_list = ["hat"]
 
@@ -67,6 +73,9 @@ class FlowData:
         """ Number of events/cells"""
         return self._metadata['$TOT']
 
+    @nevents.setter
+    def nevents(self, n):
+        self._metadata['$TOT'] = n
 
     @property
     def tags(self):
@@ -116,6 +125,9 @@ class FlowData:
             fd = FlowData('test.fcs')
             fd.CD45
             will return the appropreate channel
+
+            If we provide a boolian vector of length nevents, we generate a new 
+            FlowData object, with the selected rows
         """
         # TODO: most tags/markers are not valid property names, use regular expressions
         # to allow these to be called in a normalized fashion
@@ -124,8 +136,26 @@ class FlowData:
             return self._data[self.tags.index(name)]
         if name in self.markers:
             return self._data[self.markers.index(name)]
-        
+    
         raise AttributeError("Attribute {} not defined".format(name))
+
+    def __getitem__(self, index): 
+        # In this case, we return a FlowData object with the selected rows
+        if index.__class__ is np.ndarray:
+            if len(index) == self.nevents:
+                fd = FlowData()
+                fd._data = self._data[:,index]
+                if self._analysis.__class__ is np.ndarray:
+                    fd._analysis = self._analysis[:,index]
+                fd._metadata = self._metadata
+                fd.nevents = fd._data.shape[1]
+                fd._meta_analysis = self._meta_analysis
+                return fd
+            else:
+                raise AttributeError("Dimension Mismatch")
+        else:
+            raise AttributeError("Only accepts numpy.ndarrays") 
+
     
     def get(self,name):
         """ Similar to __getattr__, but this formulation can parse pure strings,
@@ -170,13 +200,26 @@ class FlowAnalysis:
     def load(self, filename):
         """Load an fcs file into the analysis set. """
         self._fd.append(FlowData(filename))
+        t = self._make_gate(len(self._fd)-1)
+        t.title = self._fd[-1].filename
+    
+    def append(self, item):
+        self._fd.append(item)
+        t = self._make_gate(len(self._fd)-1)
+        t.title = 'Appended item {}'.format(len(self._fd)-1)
+        return t
+    def _make_gate(self, index):
+        """
+            Add a new gate to the corresponding index
+        """
         t = GateTree()
         t.active = True
         t.color = [0, 0, 0]
-        t.title = self._fd[-1].filename
-        t.gate_index(len(self._fd) - 1)
+        t.gates.append(GateIndex(index))
         self.gate_tree.addChild(t)
-    
+        return t
+           
+ 
     def list_files(self):
         lf = []
         for fd in self._fd:
@@ -201,6 +244,7 @@ class FlowAnalysis:
 
     def __iter__(self):
         return self._fd.__iter__()
+
 
     @property
     def nparameters(self):
@@ -229,25 +273,90 @@ class GateTree(Tree):
         particular gate to one set of data. 
     """
 
-
-
     def __init__(self, children = None):
         super(GateTree, self).__init__(children)
-        self.index = None
-    
+        self.gates = []
+        self.title = ''
+
     def gate(self, flow_data):
-        """
-            Traverse the tree, applying appropreate gates at each level.
+        """ Apply gates to the provided data sets.
 
-            Returns a FlowData type structure 
         """
-        # check if index is a single integer
-        if not self.index is None:
-            return flow_data[self.index] 
+        # We need to start from the top and work downwards towards the current gate
 
-        
-    def gate_index(self, index):
+        for gt in self.pathFromRoot():
+            for gate in gt.gates:
+                flow_data = gate.apply(flow_data)
+        return flow_data
+
+    def __str__(self):
+        root = self.getRoot()
+        if not root == self:
+            s = root.__str__()
+            print self.getRoot()
+            return s
+        else:
+            def walk(t, depth) :
+                s =  "---"*depth + t.title + '\n'
+                for g in t.gates:
+                    s += "   "*depth + '|->Gate: ' + g.__str__() + '\n'
+                for c in t.children:
+                    s += walk(c, depth+1) 
+                return s  
+            return walk(self, 0)
+
+
+class GateVirtual:
+    def apply(self):
+        raise NotImplementedError
+
+    def __str__(self):
+        return ' '
+
+class GateIndex(GateVirtual):
+    """
+        A gate based on index of FlowData sets loaded into 
+        a vector of FlowDatas
+    """
+    def __init__(self, index):
         self.index = index
+    
+    def apply(self, flow_data):
+        return flow_data[self.index] 
+
+    def __str__(self):
+        return 'Index = {}'.format(self.index)
 
 
-        
+class GateBound(GateVirtual):
+    def __init__(self, channel, inequality, bound):
+        self.channel = channel
+        if not inequality in ['=', '<=', '>=', '<', '>']:
+            raise ValueError('inequality provided must be one of <, >, <=, >=, =; you gave {}'.format(inequality))
+        self.inequality = inequality
+        self.bound = bound
+
+    def apply(self, flow_data):
+        if flow_data.__class__ == [].__class__:
+            # If we have a list of flow data, call on each element of list
+            # append to the returned list
+            flow_data_new = []
+            for fd in flow_data:
+                flow_data_new.append(self.apply(fd))
+            return flow_data_new
+        else:
+            selected_data = flow_data.get(self.channel)
+            index = {
+                '=':  lambda x: x == self.bound,
+                '<':  lambda x: x < self.bound,
+                '>':  lambda x: x > self.bound,
+                '<=': lambda x: x <= self.bound,
+                '>=': lambda x: x >= self.bound
+            }[self.inequality](selected_data)
+
+            return flow_data[index]
+
+    def __str__(self):
+        return self.channel + ' ' + self.inequality + ' ' + '{}'.format(self.bound)
+
+            
