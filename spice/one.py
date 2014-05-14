@@ -38,7 +38,7 @@ FS_FORMAT = '%g'
 FS_DIGITS = 3
 
 class OneFrame(wx.Frame):
-    def __init__(self, parent, flow_analysis = None,  *args, **kwargs):
+    def __init__(self, parent = None, flow_analysis = None,  *args, **kwargs):
         self.log = logging.getLogger('OneFrame')
         kwargs['parent'] = parent
         wx.Frame.__init__(self, *args, **kwargs)
@@ -54,6 +54,7 @@ class OneFrame(wx.Frame):
         self._channel = 0
         self._sample = [0]
         self.parent = parent
+        self.log.debug('Parent {}'.format(self.parent))
         self.children = []
         ######################################################################## 
         # Create the toolbar on the main window
@@ -156,11 +157,12 @@ class OneFrame(wx.Frame):
         if self.parent is None: 
             child = OneFrame(self, flow_analysis = self.fa, title = 'Child', size=(640,480))
             self.children.append(child)
+            self.log.debug('New window: {} children'.format(len(self.children)))
             child.tree.update()
             child.update_tag_list()
             child.Show()
         else:
-            self.parent.new_window()
+            self.parent.new_window(event)
 
 
     @property
@@ -216,16 +218,25 @@ class OneFrame(wx.Frame):
                 self.plus_channel()
         event.Skip()
 
-    def on_color(self, event = None, origin = None):
+    def on_color(self, event = None, active = False):
         # A plot has changed colors, apply globally
         #TODO BUGS ARE HERE
-        self.figure.on_color()
-        if not origin == self: 
-            if self.parent is None:
-                for c in self.children:
-                    c.on_color(origin = self)
-            else:
-                self.parent.on_color()
+
+        
+        if not self.parent is None and not active:
+            self.parent.on_color(active = True)
+
+        if self.parent is None and not active:
+            self.on_color(active = True)
+
+        if self.parent is None and active:
+            for c in self.children:
+                c.on_color(active = True)
+
+        if active:
+            self.figure.on_color()
+            self.tree.update()
+            
 
 # NB: We inherit from object so that getters/setters will work properly
 class OneControl(object):
@@ -882,14 +893,16 @@ class OnePlot(wx.Panel):
             if parent.active:
                 color = parent.color
                 color = [color[0]/255., color[1]/255., color[2]/255.]
+                self.log.debug('There are {} lines left in the stack'.format(len(lines)))
                 line = lines.pop(0)
                 line.set_color(color)
 
             for c in parent.children:
                 j = walk(c)
 
-        walk(self.fa.gate_tree)
-        self.draw()
+        if len(lines) > 0:
+            walk(self.fa.gate_tree)
+            self.draw()
 
 
     def draw(self):

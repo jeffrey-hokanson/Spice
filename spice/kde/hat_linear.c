@@ -24,7 +24,7 @@ void hat_linear(double *data, int N, double *density, double bandwidth, double x
 
 		for(k = bottom; k <= top; ++k){
 			xgrid = k*h + xmin;
-			density[k] += (1 - ( fabs(data[j] - xgrid)/bandwidth))/bandwidth/N;
+			density[k] += (1 - ( fabs(data[j] - xgrid)/bandwidth))/(bandwidth*N);
 		}
 	}
 }

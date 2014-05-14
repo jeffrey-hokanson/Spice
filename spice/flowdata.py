@@ -97,7 +97,7 @@ class FlowData:
 
     # TODO: Add memoize decorator to reduce computation time, perhaps also add threading option. 
     @lru_cache(maxsize=1000)
-    def kde1(self, channel, bandwidth = 0.5, kernel = 'hat', npoints = 10001):
+    def kde1(self, channel, bandwidth = 0.5, kernel = 'hat', npoints = 1001):
         """ Generate histogram
         """
         data = self.data[channel]
