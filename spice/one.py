@@ -25,9 +25,11 @@ from matplotlib.figure import Figure
 
 from flowdata import FlowData as FlowData
 from flowdata import FlowAnalysis as FlowAnalysis
+from flowdata import GateIndex, GateBound, GateTree
 
 # Helper for GUI
 from monoicon import MonoIcon
+
 
 # Logging
 import logging
@@ -164,6 +166,16 @@ class OneFrame(wx.Frame):
         else:
             self.parent.new_window(event)
 
+    def update_tree(self):
+        self.tree.update()
+
+    def update_plot(self):
+        self.control.plot()
+        #self.control._get_bandwidth()
+        #self.figure.plot()
+        #self.control._load_axes
+        self.figure.draw()
+
 
     @property
     def channel(self):
@@ -241,25 +253,152 @@ class OneFrame(wx.Frame):
             self.tree.update()
            
     def on_gate_bound(self, event = None):
-        dlg = OnGateBound()
-        
-        if dlg.ShowModal() == wx.ID_OK:
+        dlg = GateBoundWindow(self)
+        dlg.Show()
+        #if dlg.ShowModal() == wx.ID_OK:
             # get data
-            pass 
+        #    pass 
         dlg.Destroy()
 
-class OnGateBound(wx.Frame):
-    def __init__(self, parent, id):
-        wx.Frame.__init__(self, parent, id, "Pick a bound", (-1,-1), wx.Size(250,50))
-        panel = wx.Panel(self, -1)
+class GateWindow(wx.Frame):
+    def __init__(self, one_frame, gate):
+        self.log = logging.getLogger('GateWindow')
+        title = gate.title
+        self.gate = gate
+        self.one_frame = one_frame
+        
+        wx.Frame.__init__(self, one_frame, title = title, size = (300, 150))
+        panel = wx.Panel(self)
+        nb = wx.Notebook(panel)
+        
+        title_label = wx.StaticText(panel, -1, "Title:")
+        title_ctrl_ID = wx.NewId()
+        title_ctrl = wx.TextCtrl(panel, title_ctrl_ID, title, size = (250, -1))
+        self.title_ctrl = title_ctrl
+        wx.CallAfter(title_ctrl.SetInsertionPoint, 0)
+
+        # First panel is for bound gates
+        index_panel = GateIndexPanel(nb, gate, self.one_frame) 
+        nb.AddPage(index_panel, "Index")
+        bound_panel = GateBoundPanel(nb, gate, self.one_frame) 
+        nb.AddPage(bound_panel, "Bound")
+
+        title_sizer = wx.BoxSizer(wx.HORIZONTAL)
+        title_sizer.Add(title_label)
+        title_sizer.Add(title_ctrl)
+        sizer = wx.BoxSizer(wx.VERTICAL)
+        sizer.Add(title_sizer)
+        sizer.Add(nb)
+        panel.SetSizer(sizer)
+        self.log.debug("Called")
+
+        self.Bind(wx.EVT_TEXT, self.on_title, id = title_ctrl_ID)
+
+    def on_title(self, event):
+        self.log.debug("Called on_title")
+        self.gate.title = self.title_ctrl.GetValue()
+        self.one_frame.update_tree() 
+
+class GateBoundPanel(wx.Panel):
+    def __init__(self, parent, gate, one_frame):
+        self.log = logging.getLogger('GateBoundPanel')
+        wx.Panel.__init__(self, parent)
+        self.gate = gate
+        self.one_frame = one_frame
+ 
         box = wx.BoxSizer(wx.HORIZONTAL)
+        
         tag_list_ID = wx.NewId()
-        self.tag_list = wx.ComboBox(panel, tag_list_ID, size = (200, -1), style = wx.CB_DROPDOWN | wx.CB_READONLY)
+        inequality_list_ID = wx.NewId()
+        bound_spin_ID = wx.NewId()
+        
+        self.tag_list = wx.ComboBox(self, tag_list_ID, size = (150, -1), style = wx.CB_DROPDOWN | wx.CB_READONLY)
+        self.inequality_list = wx.ComboBox(self, inequality_list_ID, size = (50,-1), style = wx.CB_DROPDOWN | wx.CB_READONLY)
+        self.bound_spin = FloatSpin(self, bound_spin_ID, size = (80,-1), min_val = None, max_val = None)      
+        
+        self.bound_spin.SetFormat(FS_FORMAT)
+        self.bound_spin.SetDigits(FS_DIGITS)
+        # Add items to the tag list
+        labels = []
+        fa = one_frame.fa
+        # TODO: We should really check which tags are avalible inside the current set of gates
+        fd = fa[0]
+        self.tags = tags = fd.tags
+        markers = fd.markers
+        for j in range(fd.nparameters):
+            labels.append(tags[j] + ' :: ' + markers[j])
+        self.tag_list.AppendItems(labels)
+        self.tag_list.SetSelection(0)
+
+        inequalities = ['=', '<=', '>=', '<', '>']
+        self.inequalities = inequalities
+        self.inequality_list.AppendItems(inequalities)
+        self.inequality_list.SetSelection(1)
+
+
         box.Add(self.tag_list)
+        box.Add(self.inequality_list)
+        box.Add(self.bound_spin)         
+        
+        self.SetSizer(box)
+        self.Layout()
+      
+        self.Bind(wx.EVT_COMBOBOX, self.on_tag_list, id = tag_list_ID)
+        self.Bind(wx.EVT_COMBOBOX, self.on_inequality_list, id = inequality_list_ID)
+        self.Bind(wx.EVT_SPINCTRL, self.on_spin, id = bound_spin_ID)
 
-        self.Centre() 
+    def on_tag_list(self, event):
+        self._make_gate()
 
+    def on_inequality_list(self, event):
+        self._make_gate()
 
+    def on_spin(self, event):
+        self._make_gate() 
+
+    def _make_gate(self):
+        # TODO More robust selection of channel
+        channel = self.tags[self.tag_list.GetSelection()]
+        self.log.debug("Channel {}".format(channel))
+
+        inequality = self.inequalities[self.inequality_list.GetSelection()]
+        self.log.debug("Inequality {}".format(inequality))
+
+        bound = self.bound_spin.GetValue()
+        self.gate.gates = [GateBound(channel, inequality, bound)]
+        print self.gate
+        self.one_frame.update_plot()
+  
+class GateIndexPanel(wx.Panel):
+    def __init__(self, parent, gate, one_frame):
+        wx.Panel.__init__(self, parent)
+        self.gate = gate
+        self.parent = parent
+        self.fa = one_frame.fa
+        self.one_frame = one_frame
+        self.log = logging.getLogger('GateIndexPanel')
+
+        box = wx.BoxSizer(wx.HORIZONTAL)
+        file_label = wx.StaticText(self, -1, "Filename")
+        box.Add(file_label)
+    
+        file_list = []
+        for fd in self.fa:
+            file_list.append(fd.filename) 
+
+        file_list_ID = wx.NewId()
+        self.file_list = wx.Choice(self, -1, (100, 50), choices = file_list)
+
+        self.Bind(wx.EVT_CHOICE, self.on_file, self.file_list)
+        box.Add(self.file_list)
+
+        self.SetSizer(box)
+
+    def on_file(self, event):
+        self.gate.gates = [GateIndex(self.file_list.GetSelection())]
+        self.one_frame.update_plot()
+        self.log.debug('Set index {}'.format(self.file_list.GetSelection()))
+        print self.gate    
 
 # NB: We inherit from object so that getters/setters will work properly
 class OneControl(object):
@@ -546,10 +685,15 @@ class OneControl(object):
 
         self.draw()
 
-    def _load_axes(self, channel):
+    
+
+    def _load_axes(self, channel = None):
         """ Set the current scaling on the desired axes.
             This is called after plotting and may pull in ranges from the plot
         """
+        if channel is None:
+            channel = self.channel
+
         if self._properties.has_key(channel):
             prop = self._properties[channel]
             self.xmin = prop['xmin']
@@ -811,10 +955,19 @@ class TreeData():
             self.log.error("Found no matching widget type to the event")
         #if not hasattr(self, "on_color_ID"):
         self.on_color_ID = wx.NewId()
-            
-        self.tree.Bind(wx.EVT_MENU, lambda event: self.on_color(event, t), id = self.on_color_ID) 
+        self.on_edit_gate_ID = wx.NewId()
+        self.on_new_gate_ID = wx.NewId()
         menu = wx.Menu()
+        # Change color    
+        self.tree.Bind(wx.EVT_MENU, lambda event: self.on_color(event, t), id = self.on_color_ID) 
         menu.Append(self.on_color_ID, "Set Color")
+        
+        # Edit Gate
+        self.tree.Bind(wx.EVT_MENU, lambda event: self.on_edit_gate(event, t), id = self.on_edit_gate_ID)
+        menu.Append(self.on_edit_gate_ID, "Edit Gate")
+        self.tree.Bind(wx.EVT_MENU, lambda event: self.on_new_gate(event, t), id = self.on_new_gate_ID)
+        menu.Append(self.on_new_gate_ID, "New Gate")
+        
         self.tree.PopupMenu(menu)
         
         # Cleanup
@@ -835,6 +988,21 @@ class TreeData():
         t.color = color
         self.update()
         self.parent.on_color()
+
+    def on_edit_gate(self, event, t):
+        dlg = GateWindow(self.parent, t)
+        dlg.Show()
+        #if dlg.ShowModal() == wx.ID_OK:
+        #    pass
+    def on_new_gate(self, event, t):
+        new_gate = GateTree()
+        new_gate.title = "New Gate"
+        new_gate.color = [0, 0, 0]
+        new_gate.active = True
+        t.addChild(new_gate)
+        self.parent.update_tree()
+        dlg = GateWindow(self.parent, new_gate)
+        dlg.Show()
 
 class OnePlot(wx.Panel):
     """ A pane for one dimensional plotting.
@@ -897,16 +1065,20 @@ class OnePlot(wx.Panel):
                 color = [color[0]/255., color[1]/255., color[2]/255.]
 
                 fd = parent.gate(flow_data)
-                (xgrid, den) = fd.kde1(channel, **kwargs)
-                # Bound check
-                self.xmin = min(self.xmin, np.amin(xgrid))
-                self.xmax = max(self.xmax, np.amax(xgrid))
-                self.ymin = min(self.ymin, np.amin(den))
-                self.ymax = max(self.ymax, np.amax(den))
-        
-                self.ax.plot(xgrid, den, color = color)
-                self.log.info('Drawing line for {}'.format(parent.title))
-                  
+                try:
+                    (xgrid, den) = fd.kde1(channel, **kwargs)
+                    # Bound check
+                    self.xmin = min(self.xmin, np.amin(xgrid))
+                    self.xmax = max(self.xmax, np.amax(xgrid))
+                    self.ymin = min(self.ymin, np.amin(den))
+                    self.ymax = max(self.ymax, np.amax(den))
+            
+                    self.ax.plot(xgrid, den, color = color)
+                    self.log.info('Drawing line for {}'.format(parent.title))
+
+                except ValueError:
+                    self.log.error("Empty dataset")
+
             for c in parent.children:
                 walk(c, flow_data)
 

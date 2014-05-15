@@ -33,12 +33,15 @@ class FlowData:
                 fcs.read(path, True)
             self._path = path
             self._filename = os.path.basename(path)
+            self._original_length = self.nevents
         else:
             self._data = []
             self._metadata = {}
             self._analysis = []
             self._meta_analysis = {}
-
+            # Number of variables in original dataset, in case we make a daughter,
+            # for normalization when doing KDEs
+            self._original_length = 0
     # Raw accessors for critical
     @property
     def data(self):
@@ -110,11 +113,14 @@ class FlowData:
         """ Generate histogram
         """
         data = self.data[channel]
+        if len(data) == 0:
+            raise ValueError('Require nonempty data')
         xmin = np.min(data)
         xmax = np.max(data)
         
         if kernel == 'hat':
             den = kde.hat_linear(data, bandwidth, xmin, xmax, npoints)
+        den = den*len(data)/self._original_length
         xgrid = np.linspace(xmin, xmax, npoints)
         return (xgrid, den)
 
@@ -149,6 +155,7 @@ class FlowData:
                     fd._analysis = self._analysis[:,index]
                 fd._metadata = self._metadata
                 fd.nevents = fd._data.shape[1]
+                fd._original_length = self._original_length
                 fd._meta_analysis = self._meta_analysis
                 return fd
             else:
