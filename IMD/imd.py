@@ -29,7 +29,7 @@ The format is undocumented, but seems to be as follows:
 from lxml import etree
 import numpy as np
 import struct
-
+from functools32 import lru_cache
 
 def read_xml(filename):
     """
@@ -84,14 +84,11 @@ class Read():
         if not root.nsmap[None] in self.readible_xsd:
             raise ValueError('Cannot read the schema: {}'.format(root.nsmap[None]))
         
+        # Save the value of the namespace in which we are working        
         ns = self.ns = "{" + root.nsmap[None] + "}"
-        print ns
-        # Count number of columns
-        ncol = 0
-        for child in root.iter(ns +'AcquisitionMarkers'):
-            ncol += 1
 
-        self.ncol = ncol
+        # Count number of columns
+        ncol = self.ncol
         print "There are {} tags in use".format(ncol)
        
 
@@ -155,6 +152,56 @@ class Read():
         Should eventually return dual compenstated value
         """
         return self._intensity(index) 
+    
+    @property
+    @lru_cache(None)
+    def ncol(self):
+        ncol = 0
+        for child in self.root.iter(self.ns +'AcquisitionMarkers'):
+            ncol += 1
+        return ncol
+
+
+    @property
+    @lru_cache(None)
+    def tags(self): 
+        """
+            List of tags (e.g., CD45, TIM-3)
+        """        
+        tags = [None] * self.ncol 
+        for child in self.root.iter(self.ns + 'AcquisitionMarkers'):
+            # Find properties of the particular marker we are looking at 
+            short_name = child.findtext(self.ns + 'ShortName')
+            mass = child.findtext(self.ns + 'Mass')
+            mass_symbol = child.findtext(self.ns + 'MassSymbol')        
+            
+            # Find corresponding order
+            for marker in self.root.iter(self.ns + 'AcquisitionAnalytes'):
+                if marker.findtext(self.ns + 'Mass') == mass and marker.findtext(self.ns + 'Symbol') == mass_symbol:
+                    order = int(marker.findtext(self.ns + 'OrderNumber'))
+                    break
+
+            # Their ordering is one indexed
+            tags[order - 1] = short_name
+        return tags
+    
+    @property
+    @lru_cache(None)
+    def markers(self): 
+        """
+            List of markers (e.g., Ir191)
+        """        
+        markers = [None] * self.ncol 
+        # Find corresponding order
+        for marker in self.root.iter(self.ns + 'AcquisitionAnalytes'):
+            order = int(marker.findtext(self.ns + 'OrderNumber'))
+            mass_number = int(round(float(marker.findtext(self.ns + "Mass"))))
+            symbol = marker.findtext(self.ns + "Symbol")
+        
+            markers[order - 1] = symbol + str(mass_number)
+        return markers
+
+
 
 def main():
     xml_str = read_xml('test.imd')
@@ -164,7 +211,7 @@ def main():
     np.set_printoptions(edgeitems = 4000, linewidth = 150)
     #print data.pulse[500:1000]
     
-    print data.xml_str
-
+    print data.tags
+    print data.markers
 if __name__ == "__main__":
     main()
