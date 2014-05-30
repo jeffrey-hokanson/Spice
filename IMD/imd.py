@@ -28,6 +28,8 @@ The format is undocumented, but seems to be as follows:
 # Switching to lxml for better namespace support
 from lxml import etree
 import numpy as np
+import struct
+
 
 def read_xml(filename):
     """
@@ -59,9 +61,17 @@ def read_xml(filename):
     return xml_str
 
 
-class read():
+
+class Read():
     """
-        Provides an interface
+    An interface for reading IMD files.
+
+    This class keeps the data on disk unless called for by accessing using [] syntax;
+    e.g.,
+        x = imd.read('test.imd')
+        x[0:50]
+    will return the 50 rows of the datafile.
+    Other properties are also accessible.
     """
  
     readible_xsd = 'http://www.dvssciences.com/xsd/Cytof/Experiment_1_0.xsd'
@@ -83,9 +93,24 @@ class read():
 
         self.ncol = ncol
         print "There are {} tags in use".format(ncol)
+       
 
 
-    def __getitem__(self, index):
+        # We make a tiny class so that we can access the pulse data using
+        # self.pulse[5:10]
+        class PulseArray():
+            def __getitem__(s, index):
+                return self._pulse(index)
+        self.pulse = PulseArray()
+
+        # Same for intensity
+        class IntensityArray():
+            def __getitem(s, index):
+                return self._intensity(index)
+        self.intensity = IntensityArray()
+
+
+    def _read_binary(self, index):
         if isinstance(index, slice):
             print "slice"
             start = index.start
@@ -105,23 +130,41 @@ class read():
         
         # Now load in the data
         f = open(self.filename,'rb')
-       
-        f.seek(start*4*self.ncol)
-        d = f.read((stop-start)*4*self.ncol)
-        f.close()
-        print len(d)
-        print int(d[0])
+    
+        # Usigned int (uint16) (two bytes = 16 bits) 
+        stride = 2 
+        #print "Length of stride {}".format(stride)
+        f.seek(start*stride*self.ncol)
+        d = f.read((stop-start)*stride*self.ncol*2)
+        array = np.fromstring(d, dtype = np.uint16, count = 2*(stop-start)*self.ncol)
+        intensity = array[0::2].reshape([(stop-start), self.ncol])
+        pulse = array[1::2].reshape([(stop-start), self.ncol])
+        return (intensity, pulse)
 
-        return np.array(d)
-         
+    def _intensity(self, index):
+        (intensity, pulse) = self._read_binary(index)
+        return intensity
 
+    def _pulse(self, index):
+        (intensity, pulse) = self._read_binary(index)
+        return pulse
+
+    def __getitem__(self, index):
+        """
+        Currently an alias for the intensity channel
+        Should eventually return dual compenstated value
+        """
+        return self._intensity(index) 
 
 def main():
     xml_str = read_xml('test.imd')
-    data = read('test.imd')
+    data = Read('test.imd')
 
-    print data[5:7]
-
+    d = data[500:10000]
+    np.set_printoptions(edgeitems = 4000, linewidth = 150)
+    #print data.pulse[500:1000]
+    
+    print data.xml_str
 
 if __name__ == "__main__":
     main()
