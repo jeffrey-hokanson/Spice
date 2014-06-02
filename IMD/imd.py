@@ -24,45 +24,41 @@ The format is undocumented, but seems to be as follows:
 """
 
 #import xml.etree.ElementTree as ET
-
 # Switching to lxml for better namespace support
 from lxml import etree
 import numpy as np
 import struct
 from functools32 import lru_cache
 
-def read_xml(filename):
+
+
+# This follows the example on Stack Overflow
+# http://stackoverflow.com/questions/2745329/how-to-make-scipy-interpolate-give-an-extrapolated-result-beyond-the-input-range
+from scipy.interpolate import interp1d
+from scipy import array
+def extrap1d(interpolator):
     """
-    Find and return the string containing the xml segment of the imd file.
+    Takes an interpolation routine and extends via linear extrapolation to
+    points outside of the range.
     """
-    try:
-        f = open(filename,'rb')
-    except:
-        IOError('No such file or directory: {}'.format(filename))
+    xs = interpolator.x
+    ys = interpolator.y
 
-    step_start = 1024
-    start = 0
-    xml_str = ''
-    # While we don't have the header in the string we've read
-    while xml_str.find('<ExperimentSchema') == -1:
-        start += step_start
-        # the 2 denotes: read relative to tail of file
-        f.seek(-start,2) 
-        r = f.read(start)
-        # Strip the \x00 between characters (16 bit encoding) 
-        # and convert the remaining to a string.
-        xml_str = str(r[0::2])
+    def pointwise(x):
+        if x < xs[0]:
+            return ys[0]+(x-xs[0])*(ys[1]-ys[0])/(xs[1]-xs[0])
+        elif x > xs[-1]:
+            return ys[-1]+(x-xs[-1])*(ys[-1]-ys[-2])/(xs[-1]-xs[-2])
+        else:
+            return interpolator(x)
 
-    # Strip leading non-string parts
-    start = xml_str.index('<ExperimentSchema')
-    xml_str = xml_str[start:]  
+    def ufunclike(xs):
+        return array(map(pointwise, array(xs)))
 
-    f.close()
-    return xml_str
+    return ufunclike
 
 
-
-class Read():
+class read():
     """
     An interface for reading IMD files.
 
@@ -75,10 +71,13 @@ class Read():
     """
  
     readible_xsd = 'http://www.dvssciences.com/xsd/Cytof/Experiment_1_0.xsd'
+    dual_start_count = 1
+    round_dual = True
+
     def __init__(self, filename):
 
         self.filename = filename
-        self.xml_str = read_xml(filename)
+        self.xml_str = self.read_xml()
         root = self.root = etree.fromstring(self.xml_str)
 
         if not root.nsmap[None] in self.readible_xsd:
@@ -89,51 +88,108 @@ class Read():
 
         # Count number of columns
         ncol = self.ncol
-        print "There are {} tags in use".format(ncol)
-       
-
+        self.nrows = self.end_of_data/4/self.ncol
+      
+        # Open the file containing the data
+        self.f = open(filename, 'rb') 
 
         # We make a tiny class so that we can access the pulse data using
         # self.pulse[5:10]
         class PulseArray():
+            """ 
+            Return the high precision, low dynamic range measurement
+            """
             def __getitem__(s, index):
                 return self._pulse(index)
         self.pulse = PulseArray()
 
         # Same for intensity
         class IntensityArray():
+            """
+            Return the low precision, high dynamic range measurement
+            """
             def __getitem(s, index):
                 return self._intensity(index)
         self.intensity = IntensityArray()
 
+    def __del__(self):
+        # Close open file
+        self.f.close()
+    
+    def read_xml(self):
+        """
+        Find and return the string containing the xml segment of the imd file.
+        """
+        filename = self.filename
+        f = open(filename,'rb')
+
+        step = 1024
+        xml_str = ''
+        end_of_data = 0
+        # While we don't have the header in the string we've read
+        while xml_str.find('<ExperimentSchema') == -1:
+            end_of_data += step
+            # the 2 denotes: read relative to tail of file
+            f.seek(-end_of_data,2) 
+            r = f.read(end_of_data)
+            # Strip the \x00 between characters (16 bit encoding) 
+            # and convert the remaining to a string.
+            xml_str = str(r[0::2])
+
+        # Strip leading non-string parts
+        start = xml_str.index('<ExperimentSchema')
+        xml_str = xml_str[start:]
+        # multiply by two to account for halving the length of the string 
+        end_of_data -= start*2
+
+        from os import fstat
+        end_of_data = fstat(f.fileno()).st_size - end_of_data
+
+
+        self.end_of_data = end_of_data
+        f.close()
+
+        return xml_str
+
 
     def _read_binary(self, index):
         if isinstance(index, slice):
-            print "slice"
             start = index.start
             stop = index.stop
             step = index.step
-            print index.start
-            print index.stop
-            print index.step
 
         elif isinstance(index, int):
-            print "int"
             start = index
             stop = index+1
             step = 1
         else:
-            ValueError("Not a recognized type") 
-        
-        # Now load in the data
-        f = open(self.filename,'rb')
-    
+            raise ValueError("Not a recognized index type") 
         # Usigned int (uint16) (two bytes = 16 bits) 
         stride = 2 
-        #print "Length of stride {}".format(stride)
-        f.seek(start*stride*self.ncol)
+        # how many rows
+        nrows = self.end_of_data/stride/2/self.ncol
+        # range check, not allowing beyond the end of file
+
+        if stop > nrows and isinstance(index, int):
+            raise ValueError("Index out of range")
+
+        # TODO: Handle negative indices
+        if start > stop:
+            raise NotImplementedError()
+
+        if stop > nrows and start > nrows:
+            return ([], [])
+
+        start = min(nrows, start)
+        stop = min(nrows, stop)
+ 
+        # Now load in the data
+        f = self.f  
+        #print "Length of stride {}".format(stride
+        f.seek(start*stride*self.ncol*2)
+
         d = f.read((stop-start)*stride*self.ncol*2)
-        array = np.fromstring(d, dtype = np.uint16, count = 2*(stop-start)*self.ncol)
+        array = np.fromstring(d, dtype = np.uint16, count = stride*(stop-start)*self.ncol)
         intensity = array[0::2].reshape([(stop-start), self.ncol])
         pulse = array[1::2].reshape([(stop-start), self.ncol])
         return (intensity, pulse)
@@ -148,11 +204,47 @@ class Read():
 
     def __getitem__(self, index):
         """
-        Currently an alias for the intensity channel
-        Should eventually return dual compenstated value
+        Return the dual compensated measurements
         """
-        return self._intensity(index) 
-    
+        (intensity, pulse) = self._read_binary(index)
+        slope = self.slopes
+        dual_start_count = self.dual_start_count
+        # From advice from Rachel Finck who reverse engineered the DVS algorithm:
+        # IF slope*intensity>=pulse OR pulse>dual_start_count
+        # dual=slope*intensity
+        # ELSE
+        # dual=pulse
+        # The default dual_start_count is 1 on our software; on older software it was 3. 
+
+        # Python apparently automatically broadcasts vector/ matrix multiplication as entrywise
+        slope_intensity = slope*intensity
+        
+        # Evaluate the logic entry wise
+        case = (slope_intensity > pulse) | (pulse > dual_start_count)
+        
+        # Apply the formula; unary minus flips True/False
+        dual = (slope_intensity*case) + (-case)*pulse 
+
+        if self.round_dual:
+            dual = dual.astype(np.int32)    
+
+        return dual 
+   
+
+#   def iter(self, stepsize = 1024, start = 0):
+#       """
+#       Returns an iterator that steps over columns
+#       """
+#       class Iter:
+#           def __init__(s):
+#               s.stepsize = stepsize
+#               s.start = start
+#           def __iter__(s):
+#               return s
+#           def next(s):
+#               pass 
+
+ 
     @property
     @lru_cache(None)
     def ncol(self):
@@ -187,31 +279,173 @@ class Read():
     
     @property
     @lru_cache(None)
-    def markers(self): 
+    def _analytes(self): 
         """
-            List of markers (e.g., Ir191)
+        Extract information about the heavy metal tags
+
         """        
-        markers = [None] * self.ncol 
+        symbols = [None] * self.ncol 
+        mass = [None] * self.ncol 
         # Find corresponding order
         for marker in self.root.iter(self.ns + 'AcquisitionAnalytes'):
             order = int(marker.findtext(self.ns + 'OrderNumber'))
-            mass_number = int(round(float(marker.findtext(self.ns + "Mass"))))
-            symbol = marker.findtext(self.ns + "Symbol")
+            mass[order - 1] = float(marker.findtext(self.ns + "Mass"))
+            symbols[order - 1] = marker.findtext(self.ns + "Symbol")
         
-            markers[order - 1] = symbol + str(mass_number)
+        return (symbols, mass) 
+ 
+    @property
+    @lru_cache(None)
+    def markers(self): 
+        """
+            List of markers (e.g., Ir191)
+        """
+        makers = [None] * self.ncol   
+        symbols, mass = self._analytes
+
+        def name(symbol, m):
+            return symbol + str(int(round(m)))
+
+        markers = map(name, symbols, mass)
+
         return markers
+    
+    @property
+    @lru_cache(None)
+    def symbols(self):
+        """
+        Atomic symbols: e.g., Ir, Gd  
+        """    
+        symbols, mass = self._analytes
+        return symbols
 
 
+    @property
+    @lru_cache(None)
+    def masses(self):
+        """
+        Return the atomic masses of the heavy metal tags used
+        """
+        symbols, mass = self._analytes
+        return mass
+
+
+    @property
+    @lru_cache(None)
+    def _acquistion_markers(self):
+        """
+        Extract data from the AcquisitionMarkers tag
+        """
+        names = [None] * self.ncol
+        descriptions = [None] * self.ncol
+
+
+        for child in self.root.iter(self.ns + 'AcquisitionMarkers'):
+            mass = float(child.findtext(self.ns + "Mass"))
+            symbol = child.findtext(self.ns + "MassSymbol")
+            # determine which entry this corresponds with in the list of masses
+            index = self.masses.index(mass)
+            if not symbol == self.symbols[index]:
+                raise ValueError("Element information does not match")
+            
+            names[index] = child.findtext(self.ns + "ShortName")
+            descriptions[index] = child.findtext(self.ns + "Description")
+        
+        return (names, descriptions)
+
+    @property
+    @lru_cache(None)
+    def tags(self):
+        """
+        List of tags (e.g., CD10)
+        """
+        names, descriptions = self._acquistion_markers
+        return names
+
+    @property
+    @lru_cache(None)
+    def descriptions(self):
+        """
+        List of descriptions (e.g., CD10).  These generally are copies of
+        the ShortName field in the xml file.
+        """
+        names, descriptions = self._acquistion_markers
+        return descriptions
+
+    @property
+    @lru_cache(None)
+    def slope_parameters(self):
+        """ 
+            Return the vector (mass, intercept, slope)
+        """
+        mass = []
+        intercept = []
+        slope = []
+        for child in self.root.iter(self.ns + 'DualAnalytesSnapshot'):
+            mass.append(float(child.findtext(self.ns + "Mass")))
+            intercept.append(float(child.findtext(self.ns + "DualIntercept")))
+            slope.append(float(child.findtext(self.ns + "DualSlope")))
+        mass = np.array(mass)
+        intercept = np.array(intercept)
+        slope = np.array(slope)
+        return (mass, intercept, slope)
+
+
+    @property
+    @lru_cache(None)
+    def slopes(self):
+        """
+        Return a vector of slopes used for converting readings to Dual Counts.
+        """
+        # TODO: Improve the interpolation/extrapolation approach.  Currently 
+        # use linear interpolation, but should we other varieties instead?
+        mass, intercept, slope = self.slope_parameters   
+        fi = interp1d(mass, slope)
+        # Extrapolate to masses outside the desired range
+        fx = extrap1d(fi)
+        return fx(self.masses) 
+
+
+    def plot_slope(self):
+        """
+        Show the interpolation curve and the measured points in MatPlotLib
+        """
+        import matplotlib.pyplot as plt
+        
+        mass, intercept, slope = self.slope_parameters
+        plt.plot(mass, slope, 'ro')
+        plt.plot(self.masses, self.slopes, 'b.')
+        plt.xlabel('Mass')
+        plt.ylabel('Slope')
+        plt.title('Dual Slope Values')
+        plt.show()
+    
 
 def main():
-    xml_str = read_xml('test.imd')
-    data = Read('test.imd')
+    """
+    Private testing code
+    """
 
-    d = data[500:10000]
-    np.set_printoptions(edgeitems = 4000, linewidth = 150)
-    #print data.pulse[500:1000]
-    
-    print data.tags
+    data = read('test.imd')
+   
+    #print xml_str 
+    #print data.tags
+    #print data.markers
+    print data.masses
     print data.markers
+    print data.tags
+    print data.descriptions
+    (mass, intercept, slope) = data.slope_parameters
+    
+    np.set_printoptions(threshold = np.nan, linewidth = 150)
+
+    print data.end_of_data/data.ncol/2/2
+    start = data.end_of_data/data.ncol/4 - 100 
+    print data[start:start+10]
+    print data[start:start+100]
+
+
+    #data.plot_slope()
+ 
 if __name__ == "__main__":
     main()
