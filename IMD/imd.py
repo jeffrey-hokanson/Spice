@@ -29,8 +29,9 @@ from lxml import etree
 import numpy as np
 import struct
 from functools32 import lru_cache
+import scipy.sparse as sp
 
-
+from clint.textui import progress
 
 # This follows the example on Stack Overflow
 # http://stackoverflow.com/questions/2745329/how-to-make-scipy-interpolate-give-an-extrapolated-result-beyond-the-input-range
@@ -56,6 +57,20 @@ def extrap1d(interpolator):
         return array(map(pointwise, array(xs)))
 
     return ufunclike
+
+# From https://gist.github.com/endolith/114336
+
+def gcd(*numbers):
+    """Return the greatest common divisor of the given integers"""
+    from fractions import gcd
+    return reduce(gcd, numbers)
+
+def lcm(*numbers):
+    """Return lowest common multiple."""    
+    def lcm(a, b):
+        return (a * b) // gcd(a, b)
+    return reduce(lcm, numbers, 1)
+
 
 
 class read():
@@ -111,6 +126,48 @@ class read():
             def __getitem(s, index):
                 return self._intensity(index)
         self.intensity = IntensityArray()
+
+
+        class BothIterate():
+            """
+            Iterate over rows of both the pulse and intensity matrices.
+            """
+            # TODO: provide multiple rows of a desired width around target row
+
+            def __init__(s, nrows = 1, read_blocksize = 1000):
+                """
+                nrows = how many rows to return at a time
+                read_blocksize = number of rows to load at a time
+                """
+                s.start_block = 0
+                s.row = 0           # row inside the block we are looking at
+                s.read_blocksize = max(read_blocksize, nrows)
+                s.data = self
+                s.nrows = nrows
+                s.read_blocksize = lcm(nrows, read_blocksize)
+
+            def __iter__(s):
+                return s
+
+            def next(s):
+                if s.row == s.read_blocksize:
+                    s.row = 0
+                    s.start_block += s.read_blocksize
+                # load next block
+                if s.row == 0:
+                    (s.block_intensity, s.block_pulse) = s.data._read_binary(slice(s.start_block,s.start_block+s.read_blocksize,1))
+                s.row += s.nrows
+                if s.row + s.start_block > self.nrows:
+                    raise StopIteration
+                
+                return (s.block_intensity[s.row-s.nrows:s.row,:], s.block_pulse[s.row-s.nrows:s.row,:])
+
+
+            def __len__(s):
+                return self.nrows/s.nrows
+
+        self.both_iter = BothIterate
+
 
     def __del__(self):
         # Close open file
@@ -421,6 +478,29 @@ class read():
         plt.show()
     
 
+    def sparse(self, blocksize = 1000): 
+        """
+        Store sparse versions of the desired matrix
+        """
+        start = 0
+        sparse_pulse = sp.dok_matrix( (self.nrows, self.ncol), dtype = np.int16)
+        sparse_intensity = sp.dok_matrix( (self.nrows, self.ncol), dtype = np.int16)
+
+        x = 0
+        step = 100
+        start = 0
+        for (row_intensity, row_pulse) in progress.bar(self.both_iter(step)):
+            i = row_intensity.nonzero()
+            sparse_intensity[i[0]+start,i[1]] = row_intensity[i]
+
+            i = row_pulse.nonzero()
+            sparse_pulse[i[0]+start,i[1]] = row_pulse[i]
+           
+            start += step
+            
+       
+        return (sparse_intensity, sparse_pulse) 
+
 def main():
     """
     Private testing code
@@ -439,12 +519,14 @@ def main():
     
     np.set_printoptions(threshold = np.nan, linewidth = 150)
 
-    print data.end_of_data/data.ncol/2/2
-    start = data.end_of_data/data.ncol/4 - 100 
-    print data[start:start+10]
-    print data[start:start+100]
+    #print data.end_of_data/data.ncol/2/2
+    #start = data.end_of_data/data.ncol/4 - 100 
+    #print data[start:start+10]
+    #print data[start:start+100]
 
-
+    (intensity, pulse) = data.sparse()
+    print intensity.getnnz()
+    print intensity[0:1000]
     #data.plot_slope()
  
 if __name__ == "__main__":
