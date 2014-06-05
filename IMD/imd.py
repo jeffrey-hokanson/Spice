@@ -37,6 +37,43 @@ from clint.textui import progress
 # http://stackoverflow.com/questions/2745329/how-to-make-scipy-interpolate-give-an-extrapolated-result-beyond-the-input-range
 from scipy.interpolate import interp1d
 from scipy import array
+
+
+# 
+from scipy.lib.six import iteritems
+
+def dok_gt(self, other):
+    """
+    Element-wise greater than
+    """
+    # First, store all the non-trivial elements
+    ret = sp.dok_matrix(self, dtype = bool, copy = True)
+    for (key, val) in iteritems(self):
+        ret[key] = val > other
+    
+    # TODO: dok_matrix by default returns 0.0 for unknown keys
+    # this should be replaced by either False for bool arrays 
+    # OR, better, a default setting, either True or False
+    return ret
+
+def dok_lt(self, other):
+    """
+    Element-wise greater than
+    """
+    # First, store all the non-trivial elements
+    ret = sp.dok_matrix(self, dtype = bool, copy = True)
+    for (key, val) in iteritems(self):
+        ret[key] = val < other
+    
+    # TODO: dok_matrix by default returns 0.0 for unknown keys
+    # this should be replaced by either False for bool arrays 
+    # OR, better, a default setting, either True or False
+    return ret
+
+#sp.dok_matrix.__gt__ = dok_gt 
+#sp.dok_matrix.__lt__ = dok_lt
+
+
 def extrap1d(interpolator):
     """
     Takes an interpolation routine and extends via linear extrapolation to
@@ -210,6 +247,17 @@ class read():
 
 
     def _read_binary(self, index):
+        """
+        Reads data from disk, or from a cached sparse version if avalible;
+        returns a (intensity, pulse) channels (ints)
+        """
+        # Attempt to read from sparse versions in memory
+        try: 
+            return (self.sparse_intensity[index], self.sparse_pulse[index])
+        except AttributeError:
+            # If this fails, perform the rest of the code
+            pass
+
         if isinstance(index, slice):
             start = index.start
             stop = index.stop
@@ -274,8 +322,8 @@ class read():
         # The default dual_start_count is 1 on our software; on older software it was 3. 
 
         # Python apparently automatically broadcasts vector/ matrix multiplication as entrywise
-        slope_intensity = slope*intensity
-        
+        slope_intensity = np.multiply(slope,intensity)
+
         # Evaluate the logic entry wise
         case = (slope_intensity > pulse) | (pulse > dual_start_count)
         
@@ -287,21 +335,6 @@ class read():
 
         return dual 
    
-
-#   def iter(self, stepsize = 1024, start = 0):
-#       """
-#       Returns an iterator that steps over columns
-#       """
-#       class Iter:
-#           def __init__(s):
-#               s.stepsize = stepsize
-#               s.start = start
-#           def __iter__(s):
-#               return s
-#           def next(s):
-#               pass 
-
- 
     @property
     @lru_cache(None)
     def ncol(self):
@@ -478,7 +511,7 @@ class read():
         plt.show()
     
 
-    def sparse(self, blocksize = 1000): 
+    def sparse(self, step = 100): 
         """
         Store sparse versions of the desired matrix
         """
@@ -487,7 +520,6 @@ class read():
         sparse_intensity = sp.dok_matrix( (self.nrows, self.ncol), dtype = np.int16)
 
         x = 0
-        step = 100
         start = 0
         for (row_intensity, row_pulse) in progress.bar(self.both_iter(step)):
             i = row_intensity.nonzero()
@@ -497,9 +529,17 @@ class read():
             sparse_pulse[i[0]+start,i[1]] = row_pulse[i]
            
             start += step
-            
-       
+            if start > 10000:
+                break 
+   
         return (sparse_intensity, sparse_pulse) 
+
+    def cache(self):
+        """
+        Load a sparse representation of the data into memory, enabling
+        faster queries
+        """
+        (self.sparse_intensity, self.sparse_pulse) = self.sparse()
 
 def main():
     """
@@ -523,10 +563,20 @@ def main():
     #start = data.end_of_data/data.ncol/4 - 100 
     #print data[start:start+10]
     #print data[start:start+100]
+    if True:
+        (intensity, pulse) = data.sparse()
+        print intensity.getnnz()
+        print intensity[0:1000]
 
-    (intensity, pulse) = data.sparse()
-    print intensity.getnnz()
-    print intensity[0:1000]
+        x = intensity > 1
+        print x[0,0]
+        print x
+
+    print data[0:1000]
+
+    if True:
+        data.cache()
+        print data[0:1000]
     #data.plot_slope()
  
 if __name__ == "__main__":
